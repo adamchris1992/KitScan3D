@@ -78,6 +78,7 @@ struct CaptureView: View {
                 .padding(.vertical, 6)
             }
             .onAppear {
+                UIApplication.shared.isIdleTimerDisabled = true
                 captureManager.onFrameUpdate = { frame in
                     engine.updateLiveFrame(frame, viewportSize: geo.size)
                 }
@@ -87,6 +88,7 @@ struct CaptureView: View {
                 captureManager.startSession()
             }
             .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
                 captureManager.pauseSession()
             }
         }
@@ -140,14 +142,8 @@ struct CaptureView: View {
 
             Spacer()
 
-            Button {
-                isFullScreen3D.toggle()
-            } label: {
-                Image(systemName: isFullScreen3D ? "camera.fill" : "cube.fill")
-                    .font(.headline)
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
+            Color.clear
+                .frame(width: 40, height: 40)
         }
         .padding(.horizontal, 14)
     }
@@ -373,22 +369,8 @@ struct CaptureView: View {
                             .background(Color.green.opacity(0.35), in: Capsule())
                     }
                 } else {
-                    Button {
-                        if captureManager.isRecording {
-                            captureManager.stopRecording()
-                            captureManager.pauseSession()
-                            showScanComplete = true
-                        } else {
-                            captureManager.pauseSession()
-                            dismiss()
-                        }
-                    } label: {
-                        Label("Done", systemImage: "checkmark")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(Color.green.opacity(0.35), in: Capsule())
-                    }
+                    Color.clear
+                        .frame(width: 84, height: 36)
                 }
             }
             .padding(.bottom, 8)

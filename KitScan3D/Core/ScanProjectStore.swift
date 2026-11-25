@@ -351,9 +351,23 @@ final class ScanProjectStore: ObservableObject {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        let width = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
-        return Data(bytes: base, count: bytesPerRow * height)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        let pixelFormat = CVPixelBufferGetPixelFormatType(buffer)
+        let bytesPerPixel = (pixelFormat == kCVPixelFormatType_DepthFloat32 || pixelFormat == kCVPixelFormatType_DisparityFloat32) ? 4 : 1
+        let tightRowBytes = width * bytesPerPixel
+
+        if bytesPerRow == tightRowBytes {
+            return Data(bytes: base, count: tightRowBytes * height)
+        }
+
+        var tightData = Data(capacity: tightRowBytes * height)
+        for y in 0..<height {
+            let rowPtr = base.advanced(by: y * bytesPerRow)
+            tightData.append(rowPtr.assumingMemoryBound(to: UInt8.self), count: tightRowBytes)
+        }
+        return tightData
     }
 
     private static func flatten(_ m: simd_float3x3) -> [Float] {

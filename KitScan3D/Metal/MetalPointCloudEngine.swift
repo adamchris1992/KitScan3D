@@ -466,6 +466,26 @@ final class MetalPointCloudEngine: ObservableObject {
         return (word >> 22) ^ word
     }
 
+    private static func extractRGBA8Bytes(from cgImage: CGImage) -> [UInt8]? {
+        let width = cgImage.width
+        let height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return bytes
+    }
+
     /// Rebuilds the 3D point cloud and trajectory from saved keyframes on disk for a project.
     func loadProjectFromDisk(projectID: UUID, settings: CaptureSettings, completion: @escaping ([simd_float4x4]) -> Void) {
         accumulatorQueue.async { [weak self] in
@@ -506,7 +526,7 @@ final class MetalPointCloudEngine: ObservableObject {
                     guard let depthData = try? Data(contentsOf: depthURL),
                           let uiImage = UIImage(contentsOfFile: rgbURL.path),
                           let cgImage = uiImage.cgImage,
-                          let rgbBytes = cgImage.dataProvider?.data as Data? else { continue }
+                          let rgbBytes = Self.extractRGBA8Bytes(from: cgImage) else { continue }
 
                     let confData = try? Data(contentsOf: confURL)
                     let fx = kf.intrinsics[0]
@@ -514,8 +534,8 @@ final class MetalPointCloudEngine: ObservableObject {
                     let cx = kf.intrinsics[6]
                     let cy = kf.intrinsics[7]
 
-                    let bpp = cgImage.bitsPerPixel / 8
-                    let bpr = cgImage.bytesPerRow
+                    let bpp = 4
+                    let bpr = cgImage.width * 4
                     let strideStep = settings.manualSpacingMeters <= 0.005 ? 1 : 2
                     let scaleX = Float(kf.width) / Float(kf.depthWidth)
                     let scaleY = Float(kf.height) / Float(kf.depthHeight)
