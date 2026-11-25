@@ -253,6 +253,54 @@ final class ScanProjectStore: ObservableObject {
         saveScanMetadata(scan, projectID: projectID)
     }
 
+    func renameProject(id: UUID, newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard var project = projects.first(where: { $0.id == id }) else { return }
+        project.name = trimmed
+        project.updatedAt = Date()
+        saveProjectMetadata(project)
+
+        DispatchQueue.main.async {
+            if let idx = self.projects.firstIndex(where: { $0.id == id }) {
+                self.projects[idx] = project
+                self.projects.sort { $0.updatedAt > $1.updatedAt }
+            }
+            if self.activeProject?.id == id {
+                self.activeProject = project
+            }
+        }
+        DiagnosticsLogger.shared.log(.info, category: "Store", "Renamed project \(id.uuidString.prefix(8)) to '\(trimmed)'")
+    }
+
+    func deleteProject(id: UUID) {
+        let dir = projectDirectory(for: id)
+        try? FileManager.default.removeItem(at: dir)
+        DispatchQueue.main.async {
+            self.projects.removeAll { $0.id == id }
+            if self.activeProject?.id == id {
+                self.activeProject = self.projects.first
+            }
+        }
+        DiagnosticsLogger.shared.log(.info, category: "Store", "Deleted project \(id.uuidString.prefix(8))")
+    }
+
+    func deleteScan(projectID: UUID, scanID: UUID) {
+        let dir = scanDirectory(projectID: projectID, scanID: scanID)
+        try? FileManager.default.removeItem(at: dir)
+        if var project = projects.first(where: { $0.id == projectID }) {
+            project.scanIDs.removeAll { $0 == scanID }
+            project.updatedAt = Date()
+            saveProjectMetadata(project)
+            DispatchQueue.main.async {
+                if let idx = self.projects.firstIndex(where: { $0.id == projectID }) {
+                    self.projects[idx] = project
+                }
+            }
+        }
+        DiagnosticsLogger.shared.log(.info, category: "Store", "Deleted scan \(scanID.uuidString.prefix(8))")
+    }
+
     func loadScans(for projectID: UUID) -> [ScanSessionMetadata] {
         let scansDir = projectDirectory(for: projectID).appendingPathComponent("scans", isDirectory: true)
         guard let dirs = try? FileManager.default.contentsOfDirectory(at: scansDir, includingPropertiesForKeys: nil) else {

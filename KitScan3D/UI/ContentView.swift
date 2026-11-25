@@ -50,6 +50,9 @@ struct ProjectsHomeView: View {
     @State private var showNewProjectAlert = false
     @State private var showDiagnostics = false
     @State private var activeCaptureProject: ScanProjectMetadata?
+    @State private var projectToRename: ScanProjectMetadata?
+    @State private var renameText = ""
+    @State private var projectToDelete: ScanProjectMetadata?
 
     var body: some View {
         NavigationStack {
@@ -77,6 +80,20 @@ struct ProjectsHomeView: View {
                                     .foregroundStyle(.secondary)
                             }
                             .padding(.vertical, 4)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                projectToDelete = project
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            Button {
+                                renameText = project.name
+                                projectToRename = project
+                            } label: {
+                                Label("Rename", systemImage: "pencil")
+                            }
+                            .tint(.blue)
                         }
                     }
                 }
@@ -112,6 +129,41 @@ struct ProjectsHomeView: View {
                     newProjectName = ""
                 }
             }
+            .alert("Rename Project", isPresented: Binding(
+                get: { projectToRename != nil },
+                set: { if !$0 { projectToRename = nil } }
+            )) {
+                TextField("Project Name", text: $renameText)
+                Button("Save") {
+                    if let p = projectToRename {
+                        projectStore.renameProject(id: p.id, newName: renameText)
+                    }
+                    projectToRename = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    projectToRename = nil
+                }
+            }
+            .confirmationDialog(
+                "Delete Project?",
+                isPresented: Binding(
+                    get: { projectToDelete != nil },
+                    set: { if !$0 { projectToDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Permanently", role: .destructive) {
+                    if let p = projectToDelete {
+                        projectStore.deleteProject(id: p.id)
+                    }
+                    projectToDelete = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    projectToDelete = nil
+                }
+            } message: {
+                Text("This removes all recorded frames and depth data for '\(projectToDelete?.name ?? "")'.")
+            }
             .sheet(isPresented: $showDiagnostics) {
                 DiagnosticsConsoleView()
             }
@@ -133,12 +185,17 @@ struct ProjectDetailView: View {
     let project: ScanProjectMetadata
     @ObservedObject var captureManager: ARCaptureSessionManager
     @ObservedObject var engine: MetalPointCloudEngine
+    @Environment(\.dismiss) private var dismiss
 
     @State private var scans: [ScanSessionMetadata] = []
     @State private var showCapture = false
     @State private var showFullScreen3D = false
     @State private var isLoading3D = false
     @State private var loadedPoses: [simd_float4x4] = []
+    @State private var showRenameAlert = false
+    @State private var renameText = ""
+    @State private var showDeleteConfirm = false
+    @State private var displayTitle: String = ""
 
     var body: some View {
         List {
@@ -181,11 +238,57 @@ struct ProjectDetailView: View {
                         }
                         .padding(.vertical, 2)
                     }
+                    .onDelete { offsets in
+                        for idx in offsets {
+                            ScanProjectStore.shared.deleteScan(projectID: project.id, scanID: scans[idx].id)
+                        }
+                        scans.remove(atOffsets: offsets)
+                    }
                 }
             }
         }
-        .navigationTitle(project.name)
+        .navigationTitle(displayTitle.isEmpty ? project.name : displayTitle)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button {
+                        renameText = displayTitle.isEmpty ? project.name : displayTitle
+                        showRenameAlert = true
+                    } label: {
+                        Label("Rename Project", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete Project", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+            }
+        }
+        .alert("Rename Project", isPresented: $showRenameAlert) {
+            TextField("Project Name", text: $renameText)
+            Button("Save") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    ScanProjectStore.shared.renameProject(id: project.id, newName: trimmed)
+                    displayTitle = trimmed
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete Project?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete Permanently", role: .destructive) {
+                ScanProjectStore.shared.deleteProject(id: project.id)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all recorded frames and depth data for '\(displayTitle.isEmpty ? project.name : displayTitle)'.")
+        }
         .onAppear {
+            displayTitle = project.name
             scans = ScanProjectStore.shared.loadScans(for: project.id)
         }
         .fullScreenCover(isPresented: $showCapture, onDismiss: {

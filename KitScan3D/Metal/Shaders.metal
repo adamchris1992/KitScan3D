@@ -87,29 +87,30 @@ fragment float4 viewfinderFragment(ViewfinderVertexOut in [[stage_in]],
         return float4(0.0, 0.0, 0.0, 1.0);
     }
     constexpr sampler s(address::clamp_to_edge, filter::linear);
+    constexpr sampler depthSampler(address::clamp_to_edge, filter::nearest);
     float2 uv = in.texCoord;
 
     float y = yTexture.sample(s, uv).r;
     float2 cbcr = cbcrTexture.sample(s, uv).rg;
     float3 rgb = ycbcrToRGB(y, cbcr);
 
-    float depth = depthTexture.sample(s, uv).r;
+    float depth = depthTexture.sample(depthSampler, uv).r;
     bool hasValidDepth = !isnan(depth) && depth > 0.0;
 
     if (u.showDepthPreview != 0 && hasValidDepth) {
         if (depth >= u.nearClip && depth <= u.farClip) {
             float t = clamp((depth - u.nearClip) / max(0.001, u.farClip - u.nearClip), 0.0, 1.0);
             float3 depthTint = mix(float3(0.0, 0.9, 0.8), float3(0.1, 0.45, 1.0), t);
-            rgb = mix(rgb, depthTint, 0.22);
+            rgb = mix(rgb, depthTint, 0.28);
         } else {
-            rgb = mix(rgb, float3(0.85, 0.2, 0.15), 0.35);
+            rgb = mix(rgb, float3(0.9, 0.25, 0.15), 0.35);
         }
     }
 
     if (u.showCoverageOverlay != 0) {
-        float cov = coverageTexture.sample(s, uv).r;
+        float cov = coverageTexture.sample(depthSampler, uv).r;
         if (cov > 0.5) {
-            rgb = mix(rgb, float3(0.15, 0.95, 0.45), 0.28);
+            rgb = mix(rgb, float3(0.15, 0.95, 0.45), 0.32);
         }
     }
 

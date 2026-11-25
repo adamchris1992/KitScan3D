@@ -17,6 +17,8 @@ struct CaptureView: View {
     @State private var showSettingsSheet = false
     @State private var mapMode: MapOverlayMode = .map2D
     @State private var isFullScreen3D = false
+    @State private var toastMessage: String?
+    @State private var frameTick = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -28,6 +30,19 @@ struct CaptureView: View {
                         currentPose: captureManager.currentCameraPose
                     )
                     .ignoresSafeArea()
+                    if engine.totalPointCount == 0 {
+                        VStack(spacing: 8) {
+                            Image(systemName: "cube.transparent")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text("No 3D points captured yet.\nTap the cube icon or Record to scan.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding()
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
                 } else {
                     LiveCameraMetalView(engine: engine, settings: captureManager.settings)
                         .ignoresSafeArea()
@@ -36,6 +51,14 @@ struct CaptureView: View {
                 VStack(spacing: 12) {
                     topHUD
                     trackingBanner
+                    if let toastMessage {
+                        Text(toastMessage)
+                            .font(.caption.bold())
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.75), in: Capsule())
+                            .transition(.opacity)
+                    }
                     Spacer()
 
                     if !isFullScreen3D && mapMode != .hidden {
@@ -53,6 +76,10 @@ struct CaptureView: View {
             .onAppear {
                 captureManager.onFrameUpdate = { frame in
                     engine.updateLiveFrame(frame, viewportSize: geo.size)
+                    frameTick &+= 1
+                    if captureManager.settings.showCoverageOverlay && frameTick % 6 == 0 {
+                        engine.updateCoverageMask(for: frame, settings: captureManager.settings)
+                    }
                 }
                 captureManager.onKeyframeCaptured = { frame, _ in
                     engine.processCapturedKeyframe(frame, settings: captureManager.settings)
@@ -255,6 +282,7 @@ struct CaptureView: View {
                 } else {
                     Button {
                         captureManager.unlockAndRemeterAutoMagic()
+                        showToast("Re-metering exposure & WB...")
                     } label: {
                         VStack(spacing: 4) {
                             Image(systemName: "wand.and.stars")
@@ -267,6 +295,19 @@ struct CaptureView: View {
                 }
             }
             .padding(.bottom, 10)
+        }
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation {
+            toastMessage = text
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation {
+                if toastMessage == text {
+                    toastMessage = nil
+                }
+            }
         }
     }
 

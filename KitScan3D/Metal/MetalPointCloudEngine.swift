@@ -163,12 +163,91 @@ final class MetalPointCloudEngine: ObservableObject {
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 64, height: 48, mipmapped: false)
         desc.usage = [.shaderRead]
         coverageTexture = device.makeTexture(descriptor: desc)
+        var zeros = [UInt8](repeating: 0, count: 64 * 48)
+        coverageTexture?.replace(
+            region: MTLRegionMake2D(0, 0, 64, 48),
+            mipmapLevel: 0,
+            withBytes: &zeros,
+            bytesPerRow: 64
+        )
+    }
+
+    func updateCoverageMask(for frame: ARFrame, settings: CaptureSettings) {
+        guard let depthData = frame.sceneDepth,
+              let covTex = coverageTexture else { return }
+
+        let depthMap = depthData.depthMap
+        let transform = frame.camera.transform
+        let intrinsics = frame.camera.intrinsics
+        let camRes = frame.camera.imageResolution
+
+        accumulatorQueue.async { [weak self] in
+            guard let self else { return }
+            if self.voxelMap.isEmpty { return }
+
+            CVPixelBufferLockBaseAddress(depthMap, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(depthMap) else { return }
+
+            let dW = CVPixelBufferGetWidth(depthMap)
+            let dH = CVPixelBufferGetHeight(depthMap)
+            let bpr = CVPixelBufferGetBytesPerRow(depthMap)
+            let fx = intrinsics.columns.0.x * Float(dW) / Float(camRes.width)
+            let fy = intrinsics.columns.1.y * Float(dH) / Float(camRes.height)
+            let cx = intrinsics.columns.2.x * Float(dW) / Float(camRes.width)
+            let cy = intrinsics.columns.2.y * Float(dH) / Float(camRes.height)
+            let camPos = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+
+            let covW = 64
+            let covH = 48
+            var mask = [UInt8](repeating: 0, count: covW * covH)
+
+            for cyIdx in 0..<covH {
+                let dy = min(dH - 1, (cyIdx * dH) / covH)
+                let rowPtr = base.advanced(by: dy * bpr).assumingMemoryBound(to: Float32.self)
+                for cxIdx in 0..<covW {
+                    let dx = min(dW - 1, (cxIdx * dW) / covW)
+                    let d = rowPtr[dx]
+                    if d.isNaN || d <= 0 || d < settings.nearClipMeters || d > settings.farClipMeters {
+                        continue
+                    }
+                    let xCam = (Float(dx) + 0.5 - cx) * d / fx
+                    let yCam = -(Float(dy) + 0.5 - cy) * d / fy
+                    let zCam = -d
+                    let world = transform * SIMD4<Float>(xCam, yCam, zCam, 1.0)
+                    let pos = SIMD3<Float>(world.x, world.y, world.z)
+
+                    let spacing: Float = settings.spacingMode == .adaptive
+                        ? max(0.002, min(0.05, simd_distance(pos, camPos) * 0.004))
+                        : min(0.05, max(0.001, settings.manualSpacingMeters))
+
+                    let key = VoxelHash.key(for: pos, spacing: spacing)
+                    if self.voxelMap[key] != nil {
+                        mask[cyIdx * covW + cxIdx] = 255
+                    }
+                }
+            }
+
+            covTex.replace(
+                region: MTLRegionMake2D(0, 0, covW, covH),
+                mipmapLevel: 0,
+                withBytes: &mask,
+                bytesPerRow: covW
+            )
+        }
     }
 
     func resetPointCloud() {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
             self.voxelMap.removeAll(keepingCapacity: false)
+            var zeros = [UInt8](repeating: 0, count: 64 * 48)
+            self.coverageTexture?.replace(
+                region: MTLRegionMake2D(0, 0, 64, 48),
+                mipmapLevel: 0,
+                withBytes: &zeros,
+                bytesPerRow: 64
+            )
             self.renderLock.lock()
             self.renderPointBuffer = nil
             self.renderPointCount = 0

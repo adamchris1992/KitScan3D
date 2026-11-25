@@ -3,20 +3,21 @@ import SwiftUI
 struct CameraControlsSheet: View {
     @ObservedObject var captureManager: ARCaptureSessionManager
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedPreset: ScanPreset = .roomFast
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Quick Presets") {
-                    Picker("Apply Preset", selection: Binding(
-                        get: { ScanPreset.roomFast },
-                        set: { captureManager.settings.applyPreset($0) }
-                    )) {
+                    Picker("Apply Preset", selection: $selectedPreset) {
                         ForEach(ScanPreset.allCases) { preset in
                             Text(preset.rawValue).tag(preset)
                         }
                     }
                     .pickerStyle(.segmented)
+                    .onChange(of: selectedPreset) { _, preset in
+                        captureManager.settings.applyPreset(preset)
+                    }
                 }
 
                 Section("Resolution & Lens") {
@@ -30,10 +31,13 @@ struct CameraControlsSheet: View {
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("Lens", selection: $captureManager.settings.lens) {
-                        Text(LensOption.wide24mm.rawValue).tag(LensOption.wide24mm)
+                    HStack {
+                        Text("Lens")
+                        Spacer()
+                        Text("24 mm (Wide)")
+                            .foregroundStyle(.secondary)
                     }
-                    Text("13 mm Ultra-Wide (Beta) is disabled during LiDAR capture because Apple's ARKit `sceneDepth` only runs on the 24 mm Wide camera.")
+                    Text("13 mm Ultra-Wide (Beta) is unavailable during LiDAR capture because ARKit `sceneDepth` only runs on the 24 mm Wide camera.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -53,6 +57,7 @@ struct CameraControlsSheet: View {
                     Toggle("Manual Controls", isOn: $captureManager.settings.useManualControls)
                         .onChange(of: captureManager.settings.useManualControls) { _, enabled in
                             if enabled {
+                                captureManager.settings.isAutoMagicLocked = false
                                 captureManager.applyManualCameraControls()
                             }
                         }
@@ -65,7 +70,8 @@ struct CameraControlsSheet: View {
                             Slider(
                                 value: $captureManager.settings.manualISO,
                                 in: bounds.minISO...bounds.maxISO
-                            ) { _ in
+                            )
+                            .onChange(of: captureManager.settings.manualISO) { _, _ in
                                 captureManager.applyManualCameraControls()
                             }
                         }
@@ -76,7 +82,8 @@ struct CameraControlsSheet: View {
                             Slider(
                                 value: $captureManager.settings.manualExposureDurationSeconds,
                                 in: bounds.minExposureSeconds...bounds.maxExposureSeconds
-                            ) { _ in
+                            )
+                            .onChange(of: captureManager.settings.manualExposureDurationSeconds) { _, _ in
                                 captureManager.applyManualCameraControls()
                             }
                         }
@@ -86,7 +93,8 @@ struct CameraControlsSheet: View {
                             Slider(
                                 value: $captureManager.settings.exposureBias,
                                 in: bounds.minExposureBias...bounds.maxExposureBias
-                            ) { _ in
+                            )
+                            .onChange(of: captureManager.settings.exposureBias) { _, _ in
                                 captureManager.applyManualCameraControls()
                             }
                         }
@@ -97,7 +105,8 @@ struct CameraControlsSheet: View {
                                 value: $captureManager.settings.whiteBalanceKelvin,
                                 in: 2500...7500,
                                 step: 100
-                            ) { _ in
+                            )
+                            .onChange(of: captureManager.settings.whiteBalanceKelvin) { _, _ in
                                 captureManager.applyManualCameraControls()
                             }
                         }
