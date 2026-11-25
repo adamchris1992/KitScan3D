@@ -332,7 +332,8 @@ struct FullScreen3DViewerView: View {
             PointCloud3DMetalView(
                 engine: engine,
                 trajectoryPoses: trajectoryPoses,
-                currentPose: currentPose
+                currentPose: currentPose,
+                showLiveFrustum: false
             )
             .ignoresSafeArea()
 

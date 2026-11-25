@@ -80,7 +80,7 @@ struct CaptureSettings: Codable, Equatable {
     var maxPointBudget: Int = 1_500_000
 
     // Viewfinder Overlays
-    var showLiveDepthPreview: Bool = true
+    var showLiveDepthPreview: Bool = false
     var showCoverageOverlay: Bool = true
 
     mutating func applyPreset(_ preset: ScanPreset) {

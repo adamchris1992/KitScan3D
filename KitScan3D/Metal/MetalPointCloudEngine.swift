@@ -86,6 +86,10 @@ final class MetalPointCloudEngine: ObservableObject {
 
     private let accumulatorQueue = DispatchQueue(label: "com.kitscan3d.voxelaccumulator", qos: .userInitiated)
     private var voxelMap: [Int64: PointVertex] = [:]
+    private var coverageVoxels: Set<Int64> = []
+    private let coverageVoxelSpacing: Float = 0.04
+    private let covWidth = 128
+    private let covHeight = 96
 
     @Published private(set) var totalPointCount: Int = 0
     @Published private(set) var preview2DPoints: [SIMD2<Float>] = []
@@ -160,20 +164,20 @@ final class MetalPointCloudEngine: ObservableObject {
     }
 
     private func setupEmptyCoverageTexture() {
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 64, height: 48, mipmapped: false)
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: covWidth, height: covHeight, mipmapped: false)
         desc.usage = [.shaderRead]
         coverageTexture = device.makeTexture(descriptor: desc)
-        var zeros = [UInt8](repeating: 0, count: 64 * 48)
+        var zeros = [UInt8](repeating: 0, count: covWidth * covHeight)
         coverageTexture?.replace(
-            region: MTLRegionMake2D(0, 0, 64, 48),
+            region: MTLRegionMake2D(0, 0, covWidth, covHeight),
             mipmapLevel: 0,
             withBytes: &zeros,
-            bytesPerRow: 64
+            bytesPerRow: covWidth
         )
     }
 
     func updateCoverageMask(for frame: ARFrame, settings: CaptureSettings) {
-        guard let depthData = frame.sceneDepth,
+        guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth,
               let covTex = coverageTexture else { return }
 
         let depthMap = depthData.depthMap
@@ -183,7 +187,7 @@ final class MetalPointCloudEngine: ObservableObject {
 
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
-            if self.voxelMap.isEmpty { return }
+            if self.coverageVoxels.isEmpty { return }
 
             CVPixelBufferLockBaseAddress(depthMap, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
@@ -196,17 +200,14 @@ final class MetalPointCloudEngine: ObservableObject {
             let fy = intrinsics.columns.1.y * Float(dH) / Float(camRes.height)
             let cx = intrinsics.columns.2.x * Float(dW) / Float(camRes.width)
             let cy = intrinsics.columns.2.y * Float(dH) / Float(camRes.height)
-            let camPos = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
 
-            let covW = 64
-            let covH = 48
-            var mask = [UInt8](repeating: 0, count: covW * covH)
+            var mask = [UInt8](repeating: 0, count: self.covWidth * self.covHeight)
 
-            for cyIdx in 0..<covH {
-                let dy = min(dH - 1, (cyIdx * dH) / covH)
+            for cyIdx in 0..<self.covHeight {
+                let dy = min(dH - 1, (cyIdx * dH) / self.covHeight)
                 let rowPtr = base.advanced(by: dy * bpr).assumingMemoryBound(to: Float32.self)
-                for cxIdx in 0..<covW {
-                    let dx = min(dW - 1, (cxIdx * dW) / covW)
+                for cxIdx in 0..<self.covWidth {
+                    let dx = min(dW - 1, (cxIdx * dW) / self.covWidth)
                     let d = rowPtr[dx]
                     if d.isNaN || d <= 0 || d < settings.nearClipMeters || d > settings.farClipMeters {
                         continue
@@ -217,22 +218,18 @@ final class MetalPointCloudEngine: ObservableObject {
                     let world = transform * SIMD4<Float>(xCam, yCam, zCam, 1.0)
                     let pos = SIMD3<Float>(world.x, world.y, world.z)
 
-                    let spacing: Float = settings.spacingMode == .adaptive
-                        ? max(0.002, min(0.05, simd_distance(pos, camPos) * 0.004))
-                        : min(0.05, max(0.001, settings.manualSpacingMeters))
-
-                    let key = VoxelHash.key(for: pos, spacing: spacing)
-                    if self.voxelMap[key] != nil {
-                        mask[cyIdx * covW + cxIdx] = 255
+                    let covKey = VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing)
+                    if self.coverageVoxels.contains(covKey) {
+                        mask[cyIdx * self.covWidth + cxIdx] = 255
                     }
                 }
             }
 
             covTex.replace(
-                region: MTLRegionMake2D(0, 0, covW, covH),
+                region: MTLRegionMake2D(0, 0, self.covWidth, self.covHeight),
                 mipmapLevel: 0,
                 withBytes: &mask,
-                bytesPerRow: covW
+                bytesPerRow: self.covWidth
             )
         }
     }
@@ -241,12 +238,13 @@ final class MetalPointCloudEngine: ObservableObject {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
             self.voxelMap.removeAll(keepingCapacity: false)
-            var zeros = [UInt8](repeating: 0, count: 64 * 48)
+            self.coverageVoxels.removeAll(keepingCapacity: false)
+            var zeros = [UInt8](repeating: 0, count: self.covWidth * self.covHeight)
             self.coverageTexture?.replace(
-                region: MTLRegionMake2D(0, 0, 64, 48),
+                region: MTLRegionMake2D(0, 0, self.covWidth, self.covHeight),
                 mipmapLevel: 0,
                 withBytes: &zeros,
-                bytesPerRow: 64
+                bytesPerRow: self.covWidth
             )
             self.renderLock.lock()
             self.renderPointBuffer = nil
@@ -288,7 +286,7 @@ final class MetalPointCloudEngine: ObservableObject {
     func processCapturedKeyframe(_ frame: ARFrame, settings: CaptureSettings) {
         guard let cache = textureCache,
               let pipeline = unprojectPipeline,
-              let depthData = frame.sceneDepth,
+              let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth,
               let stagingBuf = unprojectStagingBuffer,
               let countBuf = unprojectCountBuffer,
               let yTex = makeTexture(from: frame.capturedImage, pixelFormat: .r8Unorm, planeIndex: 0, cache: cache),
@@ -370,9 +368,6 @@ final class MetalPointCloudEngine: ObservableObject {
             self.accumulatorQueue.async {
                 let budget = settings.maxPointBudget
                 for pt in batch {
-                    if self.voxelMap.count >= budget {
-                        break
-                    }
                     let pos = pt.simdPosition
                     let spacing: Float
                     if settings.spacingMode == .adaptive {
@@ -382,9 +377,18 @@ final class MetalPointCloudEngine: ObservableObject {
                         spacing = min(0.05, max(0.001, settings.manualSpacingMeters))
                     }
                     let key = VoxelHash.key(for: pos, spacing: spacing)
-                    if self.voxelMap[key] == nil {
+                    if let existing = self.voxelMap[key] {
+                        // Temporal blend smooths overlapping passes and reduces depth waviness
+                        let ePos = existing.simdPosition
+                        let eCol = SIMD3<Float>(existing.color.0, existing.color.1, existing.color.2)
+                        let nCol = SIMD3<Float>(pt.color.0, pt.color.1, pt.color.2)
+                        let blendedPos = ePos * 0.75 + pos * 0.25
+                        let blendedCol = eCol * 0.75 + nCol * 0.25
+                        self.voxelMap[key] = PointVertex(position: blendedPos, color: blendedCol)
+                    } else if self.voxelMap.count < budget {
                         self.voxelMap[key] = pt
                     }
+                    self.coverageVoxels.insert(VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing))
                 }
 
                 let allPoints = Array(self.voxelMap.values)

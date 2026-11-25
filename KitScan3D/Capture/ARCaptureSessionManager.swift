@@ -72,6 +72,9 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
         }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+            config.frameSemantics.insert(.smoothedSceneDepth)
+        }
 
         if let format = bestVideoFormat(for: settings.resolution) {
             config.videoFormat = format
@@ -337,7 +340,7 @@ extension ARCaptureSessionManager: ARSessionDelegate {
 
         guard isRecording else { return }
         guard case .normal = frame.camera.trackingState else { return }
-        guard let depthData = frame.sceneDepth else { return }
+        guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return }
 
         var shouldCapture = false
         if settings.captureMode == .manualSingleShot {

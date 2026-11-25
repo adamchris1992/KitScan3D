@@ -108,9 +108,9 @@ fragment float4 viewfinderFragment(ViewfinderVertexOut in [[stage_in]],
     }
 
     if (u.showCoverageOverlay != 0) {
-        float cov = coverageTexture.sample(depthSampler, uv).r;
-        if (cov > 0.5) {
-            rgb = mix(rgb, float3(0.15, 0.95, 0.45), 0.32);
+        float cov = coverageTexture.sample(s, uv).r;
+        if (cov > 0.25) {
+            rgb = mix(rgb, float3(0.15, 0.95, 0.45), clamp(cov, 0.0, 1.0) * 0.35);
         }
     }
 

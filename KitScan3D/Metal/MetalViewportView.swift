@@ -79,6 +79,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
     @ObservedObject var engine: MetalPointCloudEngine
     let trajectoryPoses: [simd_float4x4]
     let currentPose: simd_float4x4
+    var showLiveFrustum: Bool = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(engine: engine)
@@ -104,12 +105,14 @@ struct PointCloud3DMetalView: UIViewRepresentable {
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.trajectoryPoses = trajectoryPoses
         context.coordinator.currentPose = currentPose
+        context.coordinator.showLiveFrustum = showLiveFrustum
     }
 
     final class Coordinator: NSObject, MTKViewDelegate {
         let engine: MetalPointCloudEngine
         var trajectoryPoses: [simd_float4x4] = []
         var currentPose: simd_float4x4 = matrix_identity_float4x4
+        var showLiveFrustum: Bool = true
 
         private var depthStencilState: MTLDepthStencilState?
         private var yaw: Float = 0.6
@@ -160,7 +163,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
 
             let aspect = Float(max(1.0, view.drawableSize.width) / max(1.0, view.drawableSize.height))
             let viewProj = makeViewProjection(aspect: aspect)
-            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: 3.5)
+            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: 4.5)
 
             let snap = engine.snapshot3DPointBuffer()
             if let pcPipeline = engine.pointCloudPipeline,
@@ -198,24 +201,26 @@ struct PointCloud3DMetalView: UIViewRepresentable {
                 }
             }
 
-            // Frustum at currentPose
-            let frustumColor = SIMD4<Float>(1.0, 0.8, 0.15, 1.0)
-            let origin = SIMD3<Float>(currentPose.columns.3.x, currentPose.columns.3.y, currentPose.columns.3.z)
-            let cornersLocal: [SIMD3<Float>] = [
-                SIMD3(-0.12,  0.09, -0.22),
-                SIMD3( 0.12,  0.09, -0.22),
-                SIMD3( 0.12, -0.09, -0.22),
-                SIMD3(-0.12, -0.09, -0.22)
-            ]
-            let cornersWorld = cornersLocal.map { local -> SIMD3<Float> in
-                let w = currentPose * SIMD4<Float>(local, 1.0)
-                return SIMD3<Float>(w.x, w.y, w.z)
-            }
-            for i in 0..<4 {
-                verts.append(LineVertex(position: origin, color: frustumColor))
-                verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
-                verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
-                verts.append(LineVertex(position: cornersWorld[(i + 1) % 4], color: frustumColor))
+            if showLiveFrustum {
+                // Frustum at currentPose
+                let frustumColor = SIMD4<Float>(1.0, 0.8, 0.15, 1.0)
+                let origin = SIMD3<Float>(currentPose.columns.3.x, currentPose.columns.3.y, currentPose.columns.3.z)
+                let cornersLocal: [SIMD3<Float>] = [
+                    SIMD3(-0.12,  0.09, -0.22),
+                    SIMD3( 0.12,  0.09, -0.22),
+                    SIMD3( 0.12, -0.09, -0.22),
+                    SIMD3(-0.12, -0.09, -0.22)
+                ]
+                let cornersWorld = cornersLocal.map { local -> SIMD3<Float> in
+                    let w = currentPose * SIMD4<Float>(local, 1.0)
+                    return SIMD3<Float>(w.x, w.y, w.z)
+                }
+                for i in 0..<4 {
+                    verts.append(LineVertex(position: origin, color: frustumColor))
+                    verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
+                    verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
+                    verts.append(LineVertex(position: cornersWorld[(i + 1) % 4], color: frustumColor))
+                }
             }
             return verts
         }
