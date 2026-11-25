@@ -1,0 +1,11 @@
+# Xcode & XcodeGen generated files
+*.xcodeproj
+*.xcworkspace
+build/
+DerivedData/
+*.ipa
+*.xcarchive
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
