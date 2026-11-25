@@ -111,27 +111,33 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
 
     func startRecording(in project: ScanProjectMetadata? = nil) {
         guard isSessionRunning, !isRecording else { return }
-        let targetProject = project ?? ScanProjectStore.shared.ensureActiveProject()
-        activeProject = targetProject
 
-        let width = settings.resolution.targetWidth
-        let height = settings.resolution == .uhd4K ? 2160 : 1080
-        let scan = ScanProjectStore.shared.beginNewScanSession(in: targetProject, width: width, height: height)
+        if currentScan == nil {
+            let targetProject = project ?? ScanProjectStore.shared.ensureActiveProject()
+            activeProject = targetProject
 
-        currentScan = scan
-        capturedFrameCount = 0
+            let width = settings.resolution.targetWidth
+            let height = settings.resolution == .uhd4K ? 2160 : 1080
+            let scan = ScanProjectStore.shared.beginNewScanSession(in: targetProject, width: width, height: height)
+
+            currentScan = scan
+            capturedFrameCount = 0
+            trajectoryPoses.removeAll()
+            logger.log(.info, category: "Capture", "Recording started (\(settings.captureMode.rawValue), \(settings.resolution.rawValue))")
+        } else {
+            logger.log(.info, category: "Capture", "Recording resumed at keyframe \(capturedFrameCount)")
+        }
+
         lastKeyframeTime = 0
         lastKeyframePose = nil
-        trajectoryPoses.removeAll()
         isRecording = true
 
         if settings.isAutoMagicLocked && !settings.useManualControls {
             lockAutoMagicExposureAndWhiteBalance()
         }
-        logger.log(.info, category: "Capture", "Recording started (\(settings.captureMode.rawValue), \(settings.resolution.rawValue))")
     }
 
-    func stopRecording() {
+    func pauseRecording() {
         guard isRecording else { return }
         isRecording = false
         if let project = activeProject, var scan = currentScan {
@@ -139,7 +145,21 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
             ScanProjectStore.shared.updateScanStats(projectID: project.id, scan: scan)
             currentScan = scan
         }
-        logger.log(.info, category: "Capture", "Recording stopped. Total keyframes: \(capturedFrameCount)")
+        logger.log(.info, category: "Capture", "Recording paused. Keyframes so far: \(capturedFrameCount)")
+    }
+
+    func finishRecording() {
+        isRecording = false
+        if let project = activeProject, var scan = currentScan {
+            scan.frameCount = capturedFrameCount
+            ScanProjectStore.shared.updateScanStats(projectID: project.id, scan: scan)
+        }
+        logger.log(.info, category: "Capture", "Recording finished. Total keyframes: \(capturedFrameCount)")
+        currentScan = nil
+    }
+
+    func stopRecording() {
+        finishRecording()
     }
 
     func triggerManualShot() {

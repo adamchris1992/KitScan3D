@@ -47,7 +47,7 @@ final class ScanProjectStore: ObservableObject {
     let projectsRootURL: URL
     private let writeQueue: OperationQueue
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private let maxPendingWrites = 6
+    private let maxPendingWrites = 18
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -56,7 +56,7 @@ final class ScanProjectStore: ObservableObject {
 
         self.writeQueue = OperationQueue()
         self.writeQueue.name = "com.kitscan3d.diskwriter"
-        self.writeQueue.maxConcurrentOperationCount = 2
+        self.writeQueue.maxConcurrentOperationCount = 4
         self.writeQueue.qualityOfService = .userInitiated
 
         reloadProjects()
@@ -202,11 +202,13 @@ final class ScanProjectStore: ObservableObject {
             let depthURL = scanDir.appendingPathComponent("depth/\(depthName)")
             let confURL = scanDir.appendingPathComponent("confidence/\(confName)")
 
-            if let cgImage = self.ciContext.createCGImage(ciImage, from: ciImage.extent) {
-                let uiImage = UIImage(cgImage: cgImage)
-                if let jpegData = uiImage.jpegData(compressionQuality: 0.92) {
-                    try? jpegData.write(to: rgbURL, options: .atomic)
-                }
+            let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
+            if let jpegData = self.ciContext.jpegRepresentation(
+                of: ciImage,
+                colorSpace: rgbColorSpace,
+                options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.88]
+            ) {
+                try? jpegData.write(to: rgbURL, options: .atomic)
             }
 
             try? depthData.write(to: depthURL, options: .atomic)

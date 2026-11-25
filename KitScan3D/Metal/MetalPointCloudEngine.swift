@@ -74,7 +74,7 @@ enum VoxelHash {
     /// Returns a world-consistent voxel size so overlapping frames always hash to the same 3D grid.
     static func voxelSpacing(for settings: CaptureSettings) -> Float {
         if settings.spacingMode == .adaptive {
-            return max(0.005, min(0.025, settings.farClipMeters * 0.0018))
+            return max(0.003, min(0.015, settings.farClipMeters * 0.0009))
         }
         return min(0.05, max(0.002, settings.manualSpacingMeters))
     }
@@ -102,6 +102,7 @@ final class MetalPointCloudEngine: ObservableObject {
     private let covWidth = 128
     private let covHeight = 96
     private var unprojectFrameCounter: UInt32 = 0
+    private var lastRenderRebuildTime: CFAbsoluteTime = 0
 
     @Published private(set) var totalPointCount: Int = 0
     @Published private(set) var preview2DPoints: [SIMD2<Float>] = []
@@ -327,7 +328,7 @@ final class MetalPointCloudEngine: ObservableObject {
             targetHeight: rgbH
         )
 
-        let stride: UInt32 = settings.manualSpacingMeters <= 0.005 ? 1 : 2
+        let stride: UInt32 = 1
         unprojectFrameCounter &+= 1
         var uniforms = UnprojectUniforms(
             cameraTransform: frame.camera.transform,
@@ -384,35 +385,57 @@ final class MetalPointCloudEngine: ObservableObject {
                     self.coverageVoxels.insert(VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing))
                 }
 
-                let allPoints = Array(self.voxelMap.values)
-                let newBuf = self.device.makeBuffer(
-                    bytes: allPoints,
-                    length: MemoryLayout<PointVertex>.stride * allPoints.count,
-                    options: .storageModeShared
-                )
-
-                // Subsample up to 4,000 points for lightweight 2D top-down map
-                let step2D = max(1, allPoints.count / 4000)
-                var pts2D: [SIMD2<Float>] = []
-                pts2D.reserveCapacity(min(allPoints.count, 4000))
-                for i in Swift.stride(from: 0, to: allPoints.count, by: step2D) {
-                    let p = allPoints[i].position
-                    pts2D.append(SIMD2<Float>(p.0, p.2))
-                }
-
-                self.renderLock.lock()
-                self.renderPointBuffer = newBuf
-                self.renderPointCount = allPoints.count
-                self.renderLock.unlock()
-
-                DispatchQueue.main.async {
-                    self.totalPointCount = allPoints.count
-                    self.preview2DPoints = pts2D
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - self.lastRenderRebuildTime >= 0.4 {
+                    self.lastRenderRebuildTime = now
+                    self.rebuildRenderBufferOnQueue()
+                } else {
+                    let count = self.voxelMap.count
+                    DispatchQueue.main.async {
+                        self.totalPointCount = count
+                    }
                 }
             }
         }
 
         cmdBuf.commit()
+    }
+
+    func flushRenderBuffer(completion: (() -> Void)? = nil) {
+        accumulatorQueue.async { [weak self] in
+            self?.rebuildRenderBufferOnQueue()
+            DispatchQueue.main.async {
+                completion?()
+            }
+        }
+    }
+
+    private func rebuildRenderBufferOnQueue() {
+        let allPoints = Array(voxelMap.values)
+        let newBuf = allPoints.isEmpty ? nil : device.makeBuffer(
+            bytes: allPoints,
+            length: MemoryLayout<PointVertex>.stride * allPoints.count,
+            options: .storageModeShared
+        )
+
+        // Subsample up to 4,000 points for lightweight 2D top-down map
+        let step2D = max(1, allPoints.count / 4000)
+        var pts2D: [SIMD2<Float>] = []
+        pts2D.reserveCapacity(min(allPoints.count, 4000))
+        for i in Swift.stride(from: 0, to: allPoints.count, by: step2D) {
+            let p = allPoints[i].position
+            pts2D.append(SIMD2<Float>(p.0, p.2))
+        }
+
+        renderLock.lock()
+        renderPointBuffer = newBuf
+        renderPointCount = allPoints.count
+        renderLock.unlock()
+
+        DispatchQueue.main.async {
+            self.totalPointCount = allPoints.count
+            self.preview2DPoints = pts2D
+        }
     }
 
     func snapshotViewfinderTextures() -> (y: MTLTexture?, cbcr: MTLTexture?, depth: MTLTexture?, cov: MTLTexture?, transform: simd_float4x4) {
@@ -536,7 +559,7 @@ final class MetalPointCloudEngine: ObservableObject {
 
                     let bpp = 4
                     let bpr = cgImage.width * 4
-                    let strideStep = settings.manualSpacingMeters <= 0.005 ? 1 : 2
+                    let strideStep = 1
                     let scaleX = Float(kf.width) / Float(kf.depthWidth)
                     let scaleY = Float(kf.height) / Float(kf.depthHeight)
                     frameIndex &+= 1

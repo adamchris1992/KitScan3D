@@ -314,10 +314,12 @@ struct CaptureView: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             .padding(.horizontal, 12)
 
-            Text(captureManager.settings.captureMode == .scanAndGo ? "AUTO SCAN" : "MANUAL SHOT")
+            Text(captureManager.settings.captureMode == .scanAndGo
+                 ? (captureManager.isRecording ? "RECORDING" : (captureManager.currentScan != nil ? "PAUSED" : "AUTO SCAN"))
+                 : (captureManager.isRecording ? "MANUAL SHOT" : (captureManager.currentScan != nil ? "PAUSED" : "MANUAL")))
                 .font(.caption2.bold())
                 .tracking(1.4)
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(captureManager.isRecording ? Color.red : .white.opacity(0.85))
 
             HStack(spacing: 24) {
                 Button {
@@ -330,15 +332,15 @@ struct CaptureView: View {
                         .background(.ultraThinMaterial, in: Capsule())
                 }
 
-                // Main Record / Stop button
+                // Main Record / Pause button
                 Button {
                     if captureManager.isRecording {
-                        captureManager.stopRecording()
-                        captureManager.pauseSession()
-                        showScanComplete = true
+                        captureManager.pauseRecording()
                     } else {
                         isFullScreen3D = false
-                        engine.resetPointCloud()
+                        if captureManager.currentScan == nil {
+                            engine.resetPointCloud()
+                        }
                         captureManager.startRecording(in: project)
                     }
                 } label: {
@@ -367,6 +369,20 @@ struct CaptureView: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Color.green.opacity(0.35), in: Capsule())
+                    }
+                } else if captureManager.capturedFrameCount > 0 {
+                    Button {
+                        captureManager.finishRecording()
+                        captureManager.pauseSession()
+                        engine.flushRenderBuffer {
+                            showScanComplete = true
+                        }
+                    } label: {
+                        Label("Done", systemImage: "checkmark")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.green.opacity(0.45), in: Capsule())
                     }
                 } else {
                     Color.clear

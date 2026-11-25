@@ -65,9 +65,9 @@ struct CaptureSettings: Codable, Equatable {
 
     // Capture Mode & Rate
     var captureMode: CaptureMode = .scanAndGo
-    var scanAndGoIntervalSeconds: Double = 0.35
-    var scanAndGoMinTranslationMeters: Float = 0.12
-    var scanAndGoMinRotationDegrees: Float = 8.0
+    var scanAndGoIntervalSeconds: Double = 0.16
+    var scanAndGoMinTranslationMeters: Float = 0.05
+    var scanAndGoMinRotationDegrees: Float = 4.0
 
     // Depth Clipping (0 - 20 m)
     var nearClipMeters: Float = 0.20
@@ -76,8 +76,8 @@ struct CaptureSettings: Codable, Equatable {
 
     // Point Cloud Density & Budget
     var spacingMode: PointSpacingMode = .adaptive
-    var manualSpacingMeters: Float = 0.01 // 1 mm (0.001) to 5 cm (0.05)
-    var maxPointBudget: Int = 1_500_000
+    var manualSpacingMeters: Float = 0.005 // 1 mm (0.001) to 5 cm (0.05)
+    var maxPointBudget: Int = 3_000_000
 
     // Viewfinder Overlays
     var showLiveDepthPreview: Bool = false
