@@ -163,7 +163,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
 
             let aspect = Float(max(1.0, view.drawableSize.width) / max(1.0, view.drawableSize.height))
             let viewProj = makeViewProjection(aspect: aspect)
-            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: 4.5)
+            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: 2.4)
 
             let snap = engine.snapshot3DPointBuffer()
             if let pcPipeline = engine.pointCloudPipeline,

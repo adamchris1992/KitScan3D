@@ -70,6 +70,14 @@ enum VoxelHash {
         let iz = Int64(floor(point.z / s)) & 0x1FFFFF
         return (ix << 42) | (iy << 21) | iz
     }
+
+    /// Returns a world-consistent voxel size so overlapping frames always hash to the same 3D grid.
+    static func voxelSpacing(for settings: CaptureSettings) -> Float {
+        if settings.spacingMode == .adaptive {
+            return max(0.005, min(0.025, settings.farClipMeters * 0.0018))
+        }
+        return min(0.05, max(0.002, settings.manualSpacingMeters))
+    }
 }
 
 /// Manages Metal pipelines, live ARFrame textures, GPU depth unprojection, and voxel-hashed point cloud accumulation.
@@ -337,7 +345,7 @@ final class MetalPointCloudEngine: ObservableObject {
             stride: stride,
             maxOutputPoints: UInt32(maxStagingPoints),
             frameIndex: unprojectFrameCounter,
-            maxEdgeJumpMeters: 0.08
+            maxEdgeJumpMeters: 0.04
         )
 
         encoder.setComputePipelineState(pipeline)
@@ -360,12 +368,6 @@ final class MetalPointCloudEngine: ObservableObject {
         encoder.dispatchThreadgroups(tgCount, threadsPerThreadgroup: tgSize)
         encoder.endEncoding()
 
-        let camPos = SIMD3<Float>(
-            frame.camera.transform.columns.3.x,
-            frame.camera.transform.columns.3.y,
-            frame.camera.transform.columns.3.z
-        )
-
         cmdBuf.addCompletedHandler { [weak self] _ in
             guard let self else { return }
             let rawCount = min(Int(countPtr.pointee), self.maxStagingPoints)
@@ -375,31 +377,10 @@ final class MetalPointCloudEngine: ObservableObject {
 
             self.accumulatorQueue.async {
                 let budget = settings.maxPointBudget
+                let spacing = VoxelHash.voxelSpacing(for: settings)
                 for pt in batch {
                     let pos = pt.simdPosition
-                    let spacing: Float
-                    if settings.spacingMode == .adaptive {
-                        let dist = simd_distance(pos, camPos)
-                        spacing = max(0.002, min(0.05, dist * 0.004))
-                    } else {
-                        spacing = min(0.05, max(0.001, settings.manualSpacingMeters))
-                    }
-                    let key = VoxelHash.key(for: pos, spacing: spacing)
-                    if let existing = self.voxelMap[key] {
-                        // True running-mean voxel averaging (capped at 16 samples)
-                        let n = min(UInt16(16), (self.voxelCounts[key] ?? 1) &+ 1)
-                        let w = 1.0 / Float(n)
-                        let ePos = existing.simdPosition
-                        let eCol = SIMD3<Float>(existing.color.0, existing.color.1, existing.color.2)
-                        let nCol = SIMD3<Float>(pt.color.0, pt.color.1, pt.color.2)
-                        let meanPos = ePos + (pos - ePos) * w
-                        let meanCol = eCol + (nCol - eCol) * w
-                        self.voxelMap[key] = PointVertex(position: meanPos, color: meanCol)
-                        self.voxelCounts[key] = n
-                    } else if self.voxelMap.count < budget {
-                        self.voxelMap[key] = pt
-                        self.voxelCounts[key] = 1
-                    }
+                    self.accumulatePoint(pt, spacing: spacing, budget: budget)
                     self.coverageVoxels.insert(VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing))
                 }
 
@@ -446,16 +427,45 @@ final class MetalPointCloudEngine: ObservableObject {
         return (renderPointBuffer, renderPointCount)
     }
 
+    /// Merges a point into the voxel hash using a running mean of position and color.
+    private func accumulatePoint(_ pt: PointVertex, spacing: Float, budget: Int) {
+        let pos = pt.simdPosition
+        let key = VoxelHash.key(for: pos, spacing: spacing)
+        if let existing = voxelMap[key] {
+            let n = min(UInt16(32), (voxelCounts[key] ?? 1) &+ 1)
+            let w = 1.0 / Float(n)
+            let ePos = existing.simdPosition
+            let eCol = SIMD3<Float>(existing.color.0, existing.color.1, existing.color.2)
+            let nCol = SIMD3<Float>(pt.color.0, pt.color.1, pt.color.2)
+            let meanPos = ePos + (pos - ePos) * w
+            let meanCol = eCol + (nCol - eCol) * w
+            voxelMap[key] = PointVertex(position: meanPos, color: meanCol)
+            voxelCounts[key] = n
+        } else if voxelMap.count < budget {
+            voxelMap[key] = pt
+            voxelCounts[key] = 1
+        }
+    }
+
+    private static func pcgHash(_ v: UInt32) -> UInt32 {
+        let state = v &* 747796405 &+ 2891336453
+        let word = ((state >> ((state >> 28) &+ 4)) ^ state) &* 277803737
+        return (word >> 22) ^ word
+    }
+
     /// Rebuilds the 3D point cloud and trajectory from saved keyframes on disk for a project.
     func loadProjectFromDisk(projectID: UUID, settings: CaptureSettings, completion: @escaping ([simd_float4x4]) -> Void) {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
             self.voxelMap.removeAll(keepingCapacity: false)
+            self.voxelCounts.removeAll(keepingCapacity: false)
             var poses: [simd_float4x4] = []
 
             let store = ScanProjectStore.shared
             let scans = store.loadScans(for: projectID).sorted { $0.createdAt < $1.createdAt }
             let decoder = JSONDecoder()
+            let spacing = VoxelHash.voxelSpacing(for: settings)
+            var frameIndex: UInt32 = 0
 
             for scan in scans {
                 let scanDir = store.scanDirectory(projectID: projectID, scanID: scan.id)
@@ -490,29 +500,90 @@ final class MetalPointCloudEngine: ObservableObject {
                     let fy = kf.intrinsics[4]
                     let cx = kf.intrinsics[6]
                     let cy = kf.intrinsics[7]
-                    let camPos = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
 
                     let bpp = cgImage.bitsPerPixel / 8
                     let bpr = cgImage.bytesPerRow
-                    let strideStep = 2
+                    let strideStep = settings.manualSpacingMeters <= 0.005 ? 1 : 2
+                    let scaleX = Float(kf.width) / Float(kf.depthWidth)
+                    let scaleY = Float(kf.height) / Float(kf.depthHeight)
+                    frameIndex &+= 1
 
                     depthData.withUnsafeBytes { rawDepth in
                         let depths = rawDepth.bindMemory(to: Float32.self)
                         let confs = confData?.withUnsafeBytes { Array($0.bindMemory(to: UInt8.self)) }
 
-                        for dy in Swift.stride(from: 0, to: kf.depthHeight, by: strideStep) {
-                            for dx in Swift.stride(from: 0, to: kf.depthWidth, by: strideStep) {
-                                if self.voxelMap.count >= settings.maxPointBudget { break }
+                        for gy in 0..<((kf.depthHeight + strideStep - 1) / strideStep) {
+                            for gx in 0..<((kf.depthWidth + strideStep - 1) / strideStep) {
+                                let jx = strideStep > 1 ? Int(Self.pcgHash(UInt32(gx) &* 73856093 ^ UInt32(gy) &* 19349663 ^ frameIndex &* 83492791) % UInt32(strideStep)) : 0
+                                let jy = strideStep > 1 ? Int(Self.pcgHash(UInt32(gx) &* 2971215073 ^ UInt32(gy) &* 486187739 ^ frameIndex &* 15485863) % UInt32(strideStep)) : 0
+                                let dx = gx * strideStep + jx
+                                let dy = gy * strideStep + jy
+                                guard dx < kf.depthWidth, dy < kf.depthHeight else { continue }
+
                                 let dIdx = dy * kf.depthWidth + dx
                                 guard dIdx < depths.count else { continue }
-                                let d = depths[dIdx]
-                                if d.isNaN || d <= 0 || d < settings.nearClipMeters || d > settings.farClipMeters { continue }
+                                let rawD = depths[dIdx]
+                                if rawD.isNaN || rawD <= 0 || rawD < settings.nearClipMeters || rawD > settings.farClipMeters { continue }
                                 if let confs, dIdx < confs.count, Int(confs[dIdx]) < settings.minDepthConfidence { continue }
 
-                                let rgbX = (Float(dx) + 0.5) * Float(kf.width) / Float(kf.depthWidth)
-                                let rgbY = (Float(dy) + 0.5) * Float(kf.height) / Float(kf.depthHeight)
-                                let ux = min(Int(rgbX), cgImage.width - 1)
-                                let uy = min(Int(rgbY), cgImage.height - 1)
+                                // 3x3 edge-jump & confidence filter
+                                let edgeThreshold = min(Float(0.04), max(Float(0.015), rawD * 0.035))
+                                var sumW: Float = 1.0
+                                var sumD: Float = rawD
+                                var jumpCount = 0
+                                for oy in -1...1 {
+                                    for ox in -1...1 {
+                                        if ox == 0 && oy == 0 { continue }
+                                        let nx = dx + ox
+                                        let ny = dy + oy
+                                        if nx < 0 || ny < 0 || nx >= kf.depthWidth || ny >= kf.depthHeight {
+                                            jumpCount += 1
+                                            continue
+                                        }
+                                        let nIdx = ny * kf.depthWidth + nx
+                                        if let confs, nIdx < confs.count, Int(confs[nIdx]) < settings.minDepthConfidence {
+                                            jumpCount += 1
+                                            continue
+                                        }
+                                        let nd = depths[nIdx]
+                                        if nd.isNaN || nd <= 0 {
+                                            jumpCount += 1
+                                            continue
+                                        }
+                                        let diff = abs(nd - rawD)
+                                        if diff > edgeThreshold {
+                                            jumpCount += 1
+                                        } else {
+                                            let sigma2 = max(Float(0.0001), (edgeThreshold * 0.5) * (edgeThreshold * 0.5))
+                                            let rw = exp(-(diff * diff) / sigma2)
+                                            sumD += nd * rw
+                                            sumW += rw
+                                        }
+                                    }
+                                }
+                                if jumpCount >= 2 { continue }
+                                let d = sumD / sumW
+
+                                // Grazing angle rejection
+                                if dx > 0, dx + 1 < kf.depthWidth, dy > 0, dy + 1 < kf.depthHeight {
+                                    let dL = depths[dy * kf.depthWidth + (dx - 1)]
+                                    let dR = depths[dy * kf.depthWidth + (dx + 1)]
+                                    let dU = depths[(dy - 1) * kf.depthWidth + dx]
+                                    let dD = depths[(dy + 1) * kf.depthWidth + dx]
+                                    let slopeX = (0.5 * (dR - dL)) / max(1e-4, d * (scaleX / fx))
+                                    let slopeY = (0.5 * (dD - dU)) / max(1e-4, d * (scaleY / fy))
+                                    if slopeX * slopeX + slopeY * slopeY > 9.0 { continue }
+                                }
+
+                                let h1 = Self.pcgHash(UInt32(dx) &* 73856093 ^ UInt32(dy) &* 19349663 ^ frameIndex &* 83492791)
+                                let h2 = Self.pcgHash(UInt32(dx) &* 2971215073 ^ UInt32(dy) &* 486187739 ^ frameIndex &* 15485863)
+                                let subX = (Float(h1 & 0xFFFF) / 65535.0 - 0.5) * 0.9
+                                let subY = (Float(h2 & 0xFFFF) / 65535.0 - 0.5) * 0.9
+
+                                let rgbX = (Float(dx) + 0.5 + subX) * scaleX
+                                let rgbY = (Float(dy) + 0.5 + subY) * scaleY
+                                let ux = min(max(0, Int(rgbX)), cgImage.width - 1)
+                                let uy = min(max(0, Int(rgbY)), cgImage.height - 1)
                                 let pOffset = uy * bpr + ux * bpp
 
                                 var color = SIMD3<Float>(0.8, 0.8, 0.8)
@@ -530,14 +601,7 @@ final class MetalPointCloudEngine: ObservableObject {
                                 let world = transform * SIMD4<Float>(xCam, yCam, zCam, 1.0)
                                 let pos = SIMD3<Float>(world.x, world.y, world.z)
 
-                                let spacing: Float = settings.spacingMode == .adaptive
-                                    ? max(0.002, min(0.05, simd_distance(pos, camPos) * 0.004))
-                                    : min(0.05, max(0.001, settings.manualSpacingMeters))
-
-                                let key = VoxelHash.key(for: pos, spacing: spacing)
-                                if self.voxelMap[key] == nil {
-                                    self.voxelMap[key] = PointVertex(position: pos, color: color)
-                                }
+                                self.accumulatePoint(PointVertex(position: pos, color: color), spacing: spacing, budget: settings.maxPointBudget)
                             }
                         }
                     }

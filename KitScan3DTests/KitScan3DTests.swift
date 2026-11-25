@@ -51,4 +51,16 @@ final class KitScan3DTests: XCTestCase {
         XCTAssertEqual(k1, k2)
         XCTAssertNotEqual(k1, k3)
     }
+
+    func testWorldConsistentVoxelSpacing() {
+        var settings = CaptureSettings()
+        settings.spacingMode = .adaptive
+        settings.farClipMeters = 5.0
+        let adaptive = VoxelHash.voxelSpacing(for: settings)
+        XCTAssertEqual(adaptive, 0.009, accuracy: 0.0001)
+
+        settings.spacingMode = .manual
+        settings.manualSpacingMeters = 0.001
+        XCTAssertEqual(VoxelHash.voxelSpacing(for: settings), 0.002, accuracy: 0.0001)
+    }
 }
