@@ -319,7 +319,7 @@ final class MetalPointCloudEngine: ObservableObject {
                 let step2D = max(1, allPoints.count / 4000)
                 var pts2D: [SIMD2<Float>] = []
                 pts2D.reserveCapacity(min(allPoints.count, 4000))
-                for i in stride(from: 0, to: allPoints.count, by: step2D) {
+                for i in Swift.stride(from: 0, to: allPoints.count, by: step2D) {
                     let p = allPoints[i].position
                     pts2D.append(SIMD2<Float>(p.0, p.2))
                 }
