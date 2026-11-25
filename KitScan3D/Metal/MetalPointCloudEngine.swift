@@ -189,7 +189,7 @@ final class MetalPointCloudEngine: ObservableObject {
             makeTexture(from: $0.depthMap, pixelFormat: .r32Float, planeIndex: 0, cache: cache)
         }
 
-        let affine = frame.displayTransform(for: .portrait, viewportSize: viewportSize)
+        let affine = frame.displayTransform(for: .portrait, viewportSize: viewportSize).inverted()
         let mat = simd_float4x4(
             SIMD4<Float>(Float(affine.a), Float(affine.b), 0, 0),
             SIMD4<Float>(Float(affine.c), Float(affine.d), 0, 0),
@@ -349,6 +349,123 @@ final class MetalPointCloudEngine: ObservableObject {
         renderLock.lock()
         defer { renderLock.unlock() }
         return (renderPointBuffer, renderPointCount)
+    }
+
+    /// Rebuilds the 3D point cloud and trajectory from saved keyframes on disk for a project.
+    func loadProjectFromDisk(projectID: UUID, settings: CaptureSettings, completion: @escaping ([simd_float4x4]) -> Void) {
+        accumulatorQueue.async { [weak self] in
+            guard let self else { return }
+            self.voxelMap.removeAll(keepingCapacity: false)
+            var poses: [simd_float4x4] = []
+
+            let store = ScanProjectStore.shared
+            let scans = store.loadScans(for: projectID).sorted { $0.createdAt < $1.createdAt }
+            let decoder = JSONDecoder()
+
+            for scan in scans {
+                let scanDir = store.scanDirectory(projectID: projectID, scanID: scan.id)
+                let jsonlURL = scanDir.appendingPathComponent("keyframes.jsonl")
+                guard let content = try? String(contentsOf: jsonlURL, encoding: .utf8) else { continue }
+
+                for line in content.split(separator: "\n") {
+                    guard let lineData = line.data(using: .utf8),
+                          let kf = try? decoder.decode(KeyframeRecord.self, from: lineData),
+                          kf.intrinsics.count == 9,
+                          kf.transform.count == 16 else { continue }
+
+                    let transform = simd_float4x4(
+                        SIMD4(kf.transform[0], kf.transform[1], kf.transform[2], kf.transform[3]),
+                        SIMD4(kf.transform[4], kf.transform[5], kf.transform[6], kf.transform[7]),
+                        SIMD4(kf.transform[8], kf.transform[9], kf.transform[10], kf.transform[11]),
+                        SIMD4(kf.transform[12], kf.transform[13], kf.transform[14], kf.transform[15])
+                    )
+                    poses.append(transform)
+
+                    let depthURL = scanDir.appendingPathComponent("depth/\(kf.depthFilename)")
+                    let confURL = scanDir.appendingPathComponent("confidence/\(kf.confidenceFilename)")
+                    let rgbURL = scanDir.appendingPathComponent("rgb/\(kf.rgbFilename)")
+
+                    guard let depthData = try? Data(contentsOf: depthURL),
+                          let uiImage = UIImage(contentsOfFile: rgbURL.path),
+                          let cgImage = uiImage.cgImage,
+                          let rgbBytes = cgImage.dataProvider?.data as Data? else { continue }
+
+                    let confData = try? Data(contentsOf: confURL)
+                    let fx = kf.intrinsics[0]
+                    let fy = kf.intrinsics[4]
+                    let cx = kf.intrinsics[6]
+                    let cy = kf.intrinsics[7]
+                    let camPos = SIMD3<Float>(transform.columns.3.x, transform.columns.3.y, transform.columns.3.z)
+
+                    let bpp = cgImage.bitsPerPixel / 8
+                    let bpr = cgImage.bytesPerRow
+                    let strideStep = 2
+
+                    depthData.withUnsafeBytes { rawDepth in
+                        let depths = rawDepth.bindMemory(to: Float32.self)
+                        let confs = confData?.withUnsafeBytes { Array($0.bindMemory(to: UInt8.self)) }
+
+                        for dy in Swift.stride(from: 0, to: kf.depthHeight, by: strideStep) {
+                            for dx in Swift.stride(from: 0, to: kf.depthWidth, by: strideStep) {
+                                if self.voxelMap.count >= settings.maxPointBudget { break }
+                                let dIdx = dy * kf.depthWidth + dx
+                                guard dIdx < depths.count else { continue }
+                                let d = depths[dIdx]
+                                if d.isNaN || d <= 0 || d < settings.nearClipMeters || d > settings.farClipMeters { continue }
+                                if let confs, dIdx < confs.count, Int(confs[dIdx]) < settings.minDepthConfidence { continue }
+
+                                let rgbX = (Float(dx) + 0.5) * Float(kf.width) / Float(kf.depthWidth)
+                                let rgbY = (Float(dy) + 0.5) * Float(kf.height) / Float(kf.depthHeight)
+                                let ux = min(Int(rgbX), cgImage.width - 1)
+                                let uy = min(Int(rgbY), cgImage.height - 1)
+                                let pOffset = uy * bpr + ux * bpp
+
+                                var color = SIMD3<Float>(0.8, 0.8, 0.8)
+                                if pOffset + 2 < rgbBytes.count {
+                                    color = SIMD3<Float>(
+                                        Float(rgbBytes[pOffset]) / 255.0,
+                                        Float(rgbBytes[pOffset + 1]) / 255.0,
+                                        Float(rgbBytes[pOffset + 2]) / 255.0
+                                    )
+                                }
+
+                                let xCam = (rgbX - cx) * d / fx
+                                let yCam = -(rgbY - cy) * d / fy
+                                let zCam = -d
+                                let world = transform * SIMD4<Float>(xCam, yCam, zCam, 1.0)
+                                let pos = SIMD3<Float>(world.x, world.y, world.z)
+
+                                let spacing: Float = settings.spacingMode == .adaptive
+                                    ? max(0.002, min(0.05, simd_distance(pos, camPos) * 0.004))
+                                    : min(0.05, max(0.001, settings.manualSpacingMeters))
+
+                                let key = VoxelHash.key(for: pos, spacing: spacing)
+                                if self.voxelMap[key] == nil {
+                                    self.voxelMap[key] = PointVertex(position: pos, color: color)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let allPoints = Array(self.voxelMap.values)
+            let newBuf = allPoints.isEmpty ? nil : self.device.makeBuffer(
+                bytes: allPoints,
+                length: MemoryLayout<PointVertex>.stride * allPoints.count,
+                options: .storageModeShared
+            )
+
+            self.renderLock.lock()
+            self.renderPointBuffer = newBuf
+            self.renderPointCount = allPoints.count
+            self.renderLock.unlock()
+
+            DispatchQueue.main.async {
+                self.totalPointCount = allPoints.count
+                completion(poses)
+            }
+        }
     }
 
     private func makeTexture(

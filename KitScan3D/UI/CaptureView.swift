@@ -8,9 +8,11 @@ enum MapOverlayMode: String, CaseIterable {
 }
 
 struct CaptureView: View {
+    let project: ScanProjectMetadata
     @ObservedObject var captureManager: ARCaptureSessionManager
     @ObservedObject var engine: MetalPointCloudEngine
     @ObservedObject private var store = ScanProjectStore.shared
+    @Environment(\.dismiss) private var dismiss
 
     @State private var showSettingsSheet = false
     @State private var mapMode: MapOverlayMode = .map2D
@@ -68,6 +70,16 @@ struct CaptureView: View {
 
     private var topHUD: some View {
         HStack(spacing: 10) {
+            Button {
+                captureManager.pauseSession()
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.bold())
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+
             HStack(spacing: 6) {
                 Circle()
                     .fill(captureManager.trackingStatus.isHealthy ? Color.green : Color.orange)
@@ -159,6 +171,18 @@ struct CaptureView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 10) {
+            if !captureManager.isRecording && engine.totalPointCount > 0 {
+                Button {
+                    isFullScreen3D.toggle()
+                } label: {
+                    Label(isFullScreen3D ? "Back to Camera" : "View Full-Screen 3D Result", systemImage: isFullScreen3D ? "camera.fill" : "cube.fill")
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
             HStack(spacing: 12) {
                 Toggle("Depth", isOn: $captureManager.settings.showLiveDepthPreview)
                     .toggleStyle(.button)
@@ -195,8 +219,9 @@ struct CaptureView: View {
                     if captureManager.isRecording {
                         captureManager.stopRecording()
                     } else {
+                        isFullScreen3D = false
                         engine.resetPointCloud()
-                        captureManager.startRecording()
+                        captureManager.startRecording(in: project)
                     }
                 } label: {
                     ZStack {

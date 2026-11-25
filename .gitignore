@@ -6,6 +6,7 @@ DerivedData/
 *.ipa
 *.xcarchive
 
-# macOS / Windows
+# macOS / Windows / Local logs
 .DS_Store
 Thumbs.db
+Diagnostics/

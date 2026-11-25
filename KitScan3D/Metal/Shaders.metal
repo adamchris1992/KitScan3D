@@ -83,8 +83,11 @@ fragment float4 viewfinderFragment(ViewfinderVertexOut in [[stage_in]],
                                    texture2d<float> depthTexture [[texture(2)]],
                                    texture2d<float> coverageTexture [[texture(3)]],
                                    constant ViewfinderUniforms &u [[buffer(0)]]) {
+    if (in.texCoord.x < 0.0 || in.texCoord.x > 1.0 || in.texCoord.y < 0.0 || in.texCoord.y > 1.0) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
     constexpr sampler s(address::clamp_to_edge, filter::linear);
-    float2 uv = clamp(in.texCoord, float2(0.0), float2(1.0));
+    float2 uv = in.texCoord;
 
     float y = yTexture.sample(s, uv).r;
     float2 cbcr = cbcrTexture.sample(s, uv).rg;

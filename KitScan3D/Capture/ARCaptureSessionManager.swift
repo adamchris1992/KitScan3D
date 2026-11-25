@@ -106,14 +106,14 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
         }
     }
 
-    func startRecording() {
+    func startRecording(in project: ScanProjectMetadata? = nil) {
         guard isSessionRunning, !isRecording else { return }
-        let project = ScanProjectStore.shared.ensureActiveProject()
-        activeProject = project
+        let targetProject = project ?? ScanProjectStore.shared.ensureActiveProject()
+        activeProject = targetProject
 
         let width = settings.resolution.targetWidth
         let height = settings.resolution == .uhd4K ? 2160 : 1080
-        let scan = ScanProjectStore.shared.beginNewScanSession(in: project, width: width, height: height)
+        let scan = ScanProjectStore.shared.beginNewScanSession(in: targetProject, width: width, height: height)
 
         currentScan = scan
         capturedFrameCount = 0
