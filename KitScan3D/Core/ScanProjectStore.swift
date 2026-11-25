@@ -34,6 +34,67 @@ struct KeyframeRecord: Codable {
     let transform: [Float]  // 4x4 column-major (16 floats)
 }
 
+struct CropBox3D: Codable, Equatable {
+    var isEnabled: Bool = false
+    var centerX: Float = 0
+    var centerY: Float = 0
+    var centerZ: Float = 0
+    var sizeX: Float = 4.0
+    var sizeY: Float = 3.0
+    var sizeZ: Float = 4.0
+    var yawDegrees: Float = 0
+
+    var center: SIMD3<Float> {
+        SIMD3<Float>(centerX, centerY, centerZ)
+    }
+
+    var halfExtents: SIMD3<Float> {
+        SIMD3<Float>(max(0.1, sizeX * 0.5), max(0.1, sizeY * 0.5), max(0.1, sizeZ * 0.5))
+    }
+
+    func contains(_ p: SIMD3<Float>) -> Bool {
+        guard isEnabled else { return true }
+        let d = p - center
+        let rad = -yawDegrees * (.pi / 180.0)
+        let c = cos(rad)
+        let s = sin(rad)
+        let lx = d.x * c - d.z * s
+        let lz = d.x * s + d.z * c
+        let h = halfExtents
+        return abs(lx) <= h.x && abs(d.y) <= h.y && abs(lz) <= h.z
+    }
+}
+
+struct ProjectAlignmentState: Codable, Equatable {
+    /// Per-scan 4x4 column-major alignment transform (identity if absent).
+    var scanTransforms: [String: [Float]] = [:]
+    /// Scan IDs hidden by the user in the 3D viewer.
+    var hiddenScanIDs: [String] = []
+    /// Interactive 3D crop box.
+    var cropBox: CropBox3D = CropBox3D()
+
+    func transform(for scanID: UUID) -> simd_float4x4 {
+        guard let arr = scanTransforms[scanID.uuidString], arr.count == 16 else {
+            return matrix_identity_float4x4
+        }
+        return simd_float4x4(
+            SIMD4(arr[0], arr[1], arr[2], arr[3]),
+            SIMD4(arr[4], arr[5], arr[6], arr[7]),
+            SIMD4(arr[8], arr[9], arr[10], arr[11]),
+            SIMD4(arr[12], arr[13], arr[14], arr[15])
+        )
+    }
+
+    mutating func setTransform(_ m: simd_float4x4, for scanID: UUID) {
+        scanTransforms[scanID.uuidString] = [
+            m.columns.0.x, m.columns.0.y, m.columns.0.z, m.columns.0.w,
+            m.columns.1.x, m.columns.1.y, m.columns.1.z, m.columns.1.w,
+            m.columns.2.x, m.columns.2.y, m.columns.2.z, m.columns.2.w,
+            m.columns.3.x, m.columns.3.y, m.columns.3.z, m.columns.3.w
+        ]
+    }
+}
+
 /// Manages scan project directories in Documents/Projects/ and writes keyframes on a bounded background queue.
 /// All public methods are expected to be called from the main thread.
 final class ScanProjectStore: ObservableObject {
@@ -258,6 +319,30 @@ final class ScanProjectStore: ObservableObject {
 
     func scanDirectory(projectID: UUID, scanID: UUID) -> URL {
         projectDirectory(for: projectID).appendingPathComponent("scans/\(scanID.uuidString)", isDirectory: true)
+    }
+
+    func worldMapURL(for projectID: UUID) -> URL {
+        projectDirectory(for: projectID).appendingPathComponent("worldmap.arexperience")
+    }
+
+    func loadAlignmentState(for projectID: UUID) -> ProjectAlignmentState {
+        let url = projectDirectory(for: projectID).appendingPathComponent("alignment.json")
+        guard let data = try? Data(contentsOf: url),
+              let state = try? Self.makeDecoder().decode(ProjectAlignmentState.self, from: data) else {
+            return ProjectAlignmentState()
+        }
+        return state
+    }
+
+    func saveAlignmentState(_ state: ProjectAlignmentState, for projectID: UUID) {
+        let url = projectDirectory(for: projectID).appendingPathComponent("alignment.json")
+        if let data = try? Self.makeEncoder().encode(state) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    func refinedPosesURL(projectID: UUID, scanID: UUID) -> URL {
+        scanDirectory(projectID: projectID, scanID: scanID).appendingPathComponent("refined_poses.json")
     }
 
     // MARK: - Private Helpers

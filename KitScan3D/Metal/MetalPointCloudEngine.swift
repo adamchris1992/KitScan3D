@@ -93,6 +93,9 @@ final class MetalPointCloudEngine: ObservableObject {
     private let accumulatorQueue = DispatchQueue(label: "com.kitscan3d.voxelaccumulator", qos: .userInitiated)
     private var voxelMap: [Int64: PointVertex] = [:]
     private var voxelCounts: [Int64: UInt16] = [:]
+    private var perScanPoints: [UUID: [PointVertex]] = [:]
+    private var perScanPoses: [UUID: [simd_float4x4]] = [:]
+    private var activeMergedPoints: [PointVertex] = []
     private var unprojectFrameCounter: UInt32 = 0
     private var lastRenderRebuildTime: CFAbsoluteTime = 0
 
@@ -360,11 +363,145 @@ final class MetalPointCloudEngine: ObservableObject {
                 DispatchQueue.main.async { completion([]) }
                 return
             }
-            let pts = Array(self.voxelMap.values)
+            let pts = self.activeMergedPoints.isEmpty ? Array(self.voxelMap.values) : self.activeMergedPoints
             DispatchQueue.main.async {
                 completion(pts)
             }
         }
+    }
+
+    /// Applies non-destructive per-scan transforms, layer visibility, and 3D crop box in memory.
+    func applyAlignmentState(_ state: ProjectAlignmentState, completion: (([simd_float4x4]) -> Void)? = nil) {
+        accumulatorQueue.async { [weak self] in
+            guard let self else { return }
+            let poses = self.rebuildMergedCloudOnQueue(state: state)
+            DispatchQueue.main.async {
+                completion?(poses)
+            }
+        }
+    }
+
+    /// Computes axis-aligned bounds of the currently loaded per-scan points.
+    func computeCloudBounds(state: ProjectAlignmentState, completion: @escaping (SIMD3<Float>, SIMD3<Float>) -> Void) {
+        accumulatorQueue.async { [weak self] in
+            guard let self else { return }
+            var minP = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+            var maxP = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+            var any = false
+            let hidden = Set(state.hiddenScanIDs)
+
+            for (scanID, pts) in self.perScanPoints where !hidden.contains(scanID.uuidString) {
+                let t = state.transform(for: scanID)
+                for pt in pts {
+                    let w = t * SIMD4<Float>(pt.simdPosition, 1.0)
+                    let p = SIMD3<Float>(w.x, w.y, w.z)
+                    minP = simd_min(minP, p)
+                    maxP = simd_max(maxP, p)
+                    any = true
+                }
+            }
+
+            let center = any ? (minP + maxP) * 0.5 : .zero
+            let size = any ? simd_max(maxP - minP, SIMD3<Float>(repeating: 0.5)) : SIMD3<Float>(4, 3, 4)
+            DispatchQueue.main.async {
+                completion(center, size)
+            }
+        }
+    }
+
+    /// Runs ICP to align `sourceScanID` onto `targetScanID` and returns the updated alignment state.
+    func runICPAlignment(
+        sourceScanID: UUID,
+        targetScanID: UUID,
+        state: ProjectAlignmentState,
+        completion: @escaping (ProjectAlignmentState, ICPResult) -> Void
+    ) {
+        accumulatorQueue.async { [weak self] in
+            guard let self,
+                  let srcRaw = self.perScanPoints[sourceScanID],
+                  let tgtRaw = self.perScanPoints[targetScanID] else {
+                DispatchQueue.main.async {
+                    completion(state, ICPResult(transform: matrix_identity_float4x4, rmse: 0, inlierCount: 0))
+                }
+                return
+            }
+
+            let tgtT = state.transform(for: targetScanID)
+            let tgtWorld = tgtRaw.map { pt -> SIMD3<Float> in
+                let w = tgtT * SIMD4<Float>(pt.simdPosition, 1.0)
+                return SIMD3<Float>(w.x, w.y, w.z)
+            }
+            let srcLocal = srcRaw.map(\.simdPosition)
+            let initial = state.transform(for: sourceScanID)
+
+            let result = PointCloudRegistration.alignICP(
+                source: srcLocal,
+                target: tgtWorld,
+                initialTransform: initial
+            )
+
+            var updated = state
+            if result.inlierCount >= 12 {
+                updated.setTransform(result.transform, for: sourceScanID)
+            }
+            _ = self.rebuildMergedCloudOnQueue(state: updated)
+
+            DispatchQueue.main.async {
+                completion(updated, result)
+            }
+        }
+    }
+
+    private func rebuildMergedCloudOnQueue(state: ProjectAlignmentState) -> [simd_float4x4] {
+        let hidden = Set(state.hiddenScanIDs)
+        var merged: [PointVertex] = []
+        var poses: [simd_float4x4] = []
+
+        for (scanID, pts) in perScanPoints where !hidden.contains(scanID.uuidString) {
+            let t = state.transform(for: scanID)
+            let isIdentity = (t == matrix_identity_float4x4)
+
+            if !state.cropBox.isEnabled && isIdentity {
+                merged.append(contentsOf: pts)
+            } else {
+                for pt in pts {
+                    let pos: SIMD3<Float>
+                    if isIdentity {
+                        pos = pt.simdPosition
+                    } else {
+                        let w = t * SIMD4<Float>(pt.simdPosition, 1.0)
+                        pos = SIMD3<Float>(w.x, w.y, w.z)
+                    }
+                    if state.cropBox.contains(pos) {
+                        merged.append(PointVertex(position: pos, color: SIMD3<Float>(pt.color.0, pt.color.1, pt.color.2)))
+                    }
+                }
+            }
+
+            if let scanPoses = perScanPoses[scanID] {
+                for p in scanPoses {
+                    poses.append(isIdentity ? p : (t * p))
+                }
+            }
+        }
+
+        activeMergedPoints = merged
+        let newBuf = merged.isEmpty ? nil : device.makeBuffer(
+            bytes: merged,
+            length: MemoryLayout<PointVertex>.stride * merged.count,
+            options: .storageModeShared
+        )
+
+        renderLock.lock()
+        renderPointBuffer = newBuf
+        renderPointCount = merged.count
+        renderLock.unlock()
+
+        let count = merged.count
+        DispatchQueue.main.async {
+            self.totalPointCount = count
+        }
+        return poses
     }
 
     /// Merges a point into the voxel hash using a running mean of position and color.
@@ -417,20 +554,30 @@ final class MetalPointCloudEngine: ObservableObject {
     func loadProjectFromDisk(projectID: UUID, settings: CaptureSettings, completion: @escaping ([simd_float4x4]) -> Void) {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
-            self.voxelMap.removeAll(keepingCapacity: false)
-            self.voxelCounts.removeAll(keepingCapacity: false)
-            var poses: [simd_float4x4] = []
+            self.perScanPoints.removeAll(keepingCapacity: false)
+            self.perScanPoses.removeAll(keepingCapacity: false)
+            self.activeMergedPoints.removeAll(keepingCapacity: false)
 
             let store = ScanProjectStore.shared
             let scans = store.loadScans(for: projectID).sorted { $0.createdAt < $1.createdAt }
+            let alignmentState = store.loadAlignmentState(for: projectID)
             let decoder = JSONDecoder()
+            let isoDecoder = JSONDecoder()
+            isoDecoder.dateDecodingStrategy = .iso8601
             let spacing = VoxelHash.voxelSpacing(for: settings)
             var frameIndex: UInt32 = 0
 
             for scan in scans {
+                self.voxelMap.removeAll(keepingCapacity: true)
+                self.voxelCounts.removeAll(keepingCapacity: true)
+                var scanPoses: [simd_float4x4] = []
+
                 let scanDir = store.scanDirectory(projectID: projectID, scanID: scan.id)
                 let jsonlURL = scanDir.appendingPathComponent("keyframes.jsonl")
                 guard let content = try? String(contentsOf: jsonlURL, encoding: .utf8) else { continue }
+
+                let refinedData = try? Data(contentsOf: store.refinedPosesURL(projectID: projectID, scanID: scan.id))
+                let refinedPoses = refinedData.flatMap { try? isoDecoder.decode(RefinedScanPoses.self, from: $0) }
 
                 for line in content.split(separator: "\n") {
                     guard let lineData = line.data(using: .utf8),
@@ -438,13 +585,14 @@ final class MetalPointCloudEngine: ObservableObject {
                           kf.intrinsics.count == 9,
                           kf.transform.count == 16 else { continue }
 
+                    let poseArr = refinedPoses?.poses[kf.index] ?? kf.transform
                     let transform = simd_float4x4(
-                        SIMD4(kf.transform[0], kf.transform[1], kf.transform[2], kf.transform[3]),
-                        SIMD4(kf.transform[4], kf.transform[5], kf.transform[6], kf.transform[7]),
-                        SIMD4(kf.transform[8], kf.transform[9], kf.transform[10], kf.transform[11]),
-                        SIMD4(kf.transform[12], kf.transform[13], kf.transform[14], kf.transform[15])
+                        SIMD4(poseArr[0], poseArr[1], poseArr[2], poseArr[3]),
+                        SIMD4(poseArr[4], poseArr[5], poseArr[6], poseArr[7]),
+                        SIMD4(poseArr[8], poseArr[9], poseArr[10], poseArr[11]),
+                        SIMD4(poseArr[12], poseArr[13], poseArr[14], poseArr[15])
                     )
-                    poses.append(transform)
+                    scanPoses.append(transform)
 
                     let depthURL = scanDir.appendingPathComponent("depth/\(kf.depthFilename)")
                     let confURL = scanDir.appendingPathComponent("confidence/\(kf.confidenceFilename)")
@@ -566,23 +714,13 @@ final class MetalPointCloudEngine: ObservableObject {
                         }
                     }
                 }
+                self.perScanPoints[scan.id] = Array(self.voxelMap.values)
+                self.perScanPoses[scan.id] = scanPoses
             }
 
-            let allPoints = Array(self.voxelMap.values)
-            let newBuf = allPoints.isEmpty ? nil : self.device.makeBuffer(
-                bytes: allPoints,
-                length: MemoryLayout<PointVertex>.stride * allPoints.count,
-                options: .storageModeShared
-            )
-
-            self.renderLock.lock()
-            self.renderPointBuffer = newBuf
-            self.renderPointCount = allPoints.count
-            self.renderLock.unlock()
-
+            let mergedPoses = self.rebuildMergedCloudOnQueue(state: alignmentState)
             DispatchQueue.main.async {
-                self.totalPointCount = allPoints.count
-                completion(poses)
+                completion(mergedPoses)
             }
         }
     }

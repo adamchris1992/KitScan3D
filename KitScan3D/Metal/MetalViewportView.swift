@@ -68,6 +68,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
     let currentPose: simd_float4x4
     var showLiveFrustum: Bool = true
     var showTrajectory: Bool = true
+    var showCameraFrustums: Bool = false
+    var cropBox: CropBox3D? = nil
     var pointSize: Float = 3.4
 
     func makeCoordinator() -> Coordinator {
@@ -96,6 +98,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
         context.coordinator.currentPose = currentPose
         context.coordinator.showLiveFrustum = showLiveFrustum
         context.coordinator.showTrajectory = showTrajectory
+        context.coordinator.showCameraFrustums = showCameraFrustums
+        context.coordinator.cropBox = cropBox
         context.coordinator.pointSize = pointSize
     }
 
@@ -105,6 +109,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
         var currentPose: simd_float4x4 = matrix_identity_float4x4
         var showLiveFrustum: Bool = true
         var showTrajectory: Bool = true
+        var showCameraFrustums: Bool = false
+        var cropBox: CropBox3D? = nil
         var pointSize: Float = 3.4
 
         private var depthStencilState: MTLDepthStencilState?
@@ -168,8 +174,11 @@ struct PointCloud3DMetalView: UIViewRepresentable {
                 encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: snap.count)
             }
 
-            // Draw trajectory + active camera frustum
-            let lineVerts = showTrajectory ? buildTrajectoryAndFrustumVertices() : []
+            // Draw trajectory, frustums, and optional 3D crop box wireframe
+            var lineVerts = showTrajectory ? buildTrajectoryAndFrustumVertices() : []
+            if let box = cropBox, box.isEnabled {
+                lineVerts.append(contentsOf: buildCropBoxVertices(box))
+            }
             if let lPipeline = engine.linePipeline, !lineVerts.isEmpty {
                 encoder.setRenderPipelineState(lPipeline)
                 encoder.setVertexBytes(lineVerts, length: MemoryLayout<LineVertex>.stride * lineVerts.count, index: 0)
@@ -194,28 +203,72 @@ struct PointCloud3DMetalView: UIViewRepresentable {
                 }
             }
 
-            if showLiveFrustum {
-                // Frustum at currentPose
-                let frustumColor = SIMD4<Float>(1.0, 0.8, 0.15, 1.0)
-                let origin = SIMD3<Float>(currentPose.columns.3.x, currentPose.columns.3.y, currentPose.columns.3.z)
-                let cornersLocal: [SIMD3<Float>] = [
-                    SIMD3(-0.12,  0.09, -0.22),
-                    SIMD3( 0.12,  0.09, -0.22),
-                    SIMD3( 0.12, -0.09, -0.22),
-                    SIMD3(-0.12, -0.09, -0.22)
-                ]
-                let cornersWorld = cornersLocal.map { local -> SIMD3<Float> in
-                    let w = currentPose * SIMD4<Float>(local, 1.0)
-                    return SIMD3<Float>(w.x, w.y, w.z)
-                }
-                for i in 0..<4 {
-                    verts.append(LineVertex(position: origin, color: frustumColor))
-                    verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
-                    verts.append(LineVertex(position: cornersWorld[i], color: frustumColor))
-                    verts.append(LineVertex(position: cornersWorld[(i + 1) % 4], color: frustumColor))
+            if showCameraFrustums && !trajectoryPoses.isEmpty {
+                let step = max(1, trajectoryPoses.count / 24)
+                let frustumColor = SIMD4<Float>(0.3, 0.9, 0.6, 0.75)
+                for idx in Swift.stride(from: 0, to: trajectoryPoses.count, by: step) {
+                    appendFrustum(pose: trajectoryPoses[idx], color: frustumColor, scale: 0.75, into: &verts)
                 }
             }
+
+            if showLiveFrustum {
+                appendFrustum(pose: currentPose, color: SIMD4<Float>(1.0, 0.8, 0.15, 1.0), scale: 1.0, into: &verts)
+            }
             return verts
+        }
+
+        private func appendFrustum(pose: simd_float4x4, color: SIMD4<Float>, scale: Float, into verts: inout [LineVertex]) {
+            let origin = SIMD3<Float>(pose.columns.3.x, pose.columns.3.y, pose.columns.3.z)
+            let cornersLocal: [SIMD3<Float>] = [
+                SIMD3(-0.12 * scale,  0.09 * scale, -0.22 * scale),
+                SIMD3( 0.12 * scale,  0.09 * scale, -0.22 * scale),
+                SIMD3( 0.12 * scale, -0.09 * scale, -0.22 * scale),
+                SIMD3(-0.12 * scale, -0.09 * scale, -0.22 * scale)
+            ]
+            let cornersWorld = cornersLocal.map { local -> SIMD3<Float> in
+                let w = pose * SIMD4<Float>(local, 1.0)
+                return SIMD3<Float>(w.x, w.y, w.z)
+            }
+            for i in 0..<4 {
+                verts.append(LineVertex(position: origin, color: color))
+                verts.append(LineVertex(position: cornersWorld[i], color: color))
+                verts.append(LineVertex(position: cornersWorld[i], color: color))
+                verts.append(LineVertex(position: cornersWorld[(i + 1) % 4], color: color))
+            }
+        }
+
+        private func buildCropBoxVertices(_ box: CropBox3D) -> [LineVertex] {
+            let h = box.halfExtents
+            let c = box.center
+            let rad = box.yawDegrees * (.pi / 180.0)
+            let cosY = cos(rad)
+            let sinY = sin(rad)
+
+            let localCorners: [SIMD3<Float>] = [
+                SIMD3(-h.x, -h.y, -h.z), SIMD3( h.x, -h.y, -h.z),
+                SIMD3( h.x, -h.y,  h.z), SIMD3(-h.x, -h.y,  h.z),
+                SIMD3(-h.x,  h.y, -h.z), SIMD3( h.x,  h.y, -h.z),
+                SIMD3( h.x,  h.y,  h.z), SIMD3(-h.x,  h.y,  h.z)
+            ]
+            let worldCorners = localCorners.map { l -> SIMD3<Float> in
+                let rx = l.x * cosY + l.z * sinY
+                let rz = -l.x * sinY + l.z * cosY
+                return c + SIMD3<Float>(rx, l.y, rz)
+            }
+
+            let edges: [(Int, Int)] = [
+                (0, 1), (1, 2), (2, 3), (3, 0),
+                (4, 5), (5, 6), (6, 7), (7, 4),
+                (0, 4), (1, 5), (2, 6), (3, 7)
+            ]
+            let color = SIMD4<Float>(1.0, 0.72, 0.15, 1.0)
+            var out: [LineVertex] = []
+            out.reserveCapacity(edges.count * 2)
+            for (a, b) in edges {
+                out.append(LineVertex(position: worldCorners[a], color: color))
+                out.append(LineVertex(position: worldCorners[b], color: color))
+            }
+            return out
         }
 
         private func makeViewProjection(aspect: Float) -> simd_float4x4 {

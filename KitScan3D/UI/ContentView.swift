@@ -355,6 +355,8 @@ struct ProjectDetailView: View {
     @State private var displayTitle: String = ""
     @State private var isExportingPLY = false
     @State private var exportedPLYURL: URL?
+    @State private var showMergeAlign = false
+    @State private var alignmentState = ProjectAlignmentState()
 
     var body: some View {
         ZStack {
@@ -431,6 +433,20 @@ struct ProjectDetailView: View {
                                 badgeColor: AppTheme.badge,
                                 title: "View Scans",
                                 subtitle: "\(scans.count) recorded pass(es) • inspect 3D point clouds"
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        // Merge, Align & Refine Card
+                        Button {
+                            showMergeAlign = true
+                        } label: {
+                            ProjectActionRow(
+                                icon: "square.stack.3d.up",
+                                iconColor: .white,
+                                badgeColor: AppTheme.badge,
+                                title: "Merge, Align & Refine",
+                                subtitle: "Layer passes, auto-align (ICP) & refine poses"
                             )
                         }
                         .buttonStyle(.plain)
@@ -548,10 +564,27 @@ struct ProjectDetailView: View {
         }
         .fullScreenCover(isPresented: $showFullScreen3D) {
             FullScreen3DViewerView(
+                projectID: project.id,
                 title: displayTitle.isEmpty ? project.name : displayTitle,
                 engine: engine,
                 trajectoryPoses: loadedPoses,
-                currentPose: loadedPoses.last ?? matrix_identity_float4x4
+                currentPose: loadedPoses.last ?? matrix_identity_float4x4,
+                alignmentState: $alignmentState,
+                onAlignmentUpdated: { poses in
+                    loadedPoses = poses
+                }
+            )
+        }
+        .sheet(isPresented: $showMergeAlign) {
+            MergeAlignSheet(
+                project: project,
+                scans: scans,
+                engine: engine,
+                captureSettings: captureManager.settings,
+                alignmentState: $alignmentState,
+                onStateChanged: { poses in
+                    loadedPoses = poses
+                }
             )
         }
         .sheet(isPresented: Binding(
@@ -594,6 +627,7 @@ struct ProjectDetailView: View {
     }
 
     private func reloadProjectPreview() {
+        alignmentState = ScanProjectStore.shared.loadAlignmentState(for: project.id)
         scans = ScanProjectStore.shared.loadScans(for: project.id)
         if !scans.isEmpty && !isLoading3D {
             isLoading3D = true
@@ -736,6 +770,7 @@ struct ProjectScansSheetView: View {
     @State private var showFullScreen3D = false
     @State private var loadedPoses: [simd_float4x4] = []
     @State private var isLoading = false
+    @State private var alignmentState = ProjectAlignmentState()
 
     var body: some View {
         NavigationStack {
@@ -818,10 +853,15 @@ struct ProjectScansSheetView: View {
             }
             .fullScreenCover(isPresented: $showFullScreen3D) {
                 FullScreen3DViewerView(
+                    projectID: project.id,
                     title: projectName,
                     engine: engine,
                     trajectoryPoses: loadedPoses,
-                    currentPose: loadedPoses.last ?? matrix_identity_float4x4
+                    currentPose: loadedPoses.last ?? matrix_identity_float4x4,
+                    alignmentState: $alignmentState,
+                    onAlignmentUpdated: { poses in
+                        loadedPoses = poses
+                    }
                 )
             }
         }
@@ -829,6 +869,7 @@ struct ProjectScansSheetView: View {
 
     private func open3D() {
         isLoading = true
+        alignmentState = ScanProjectStore.shared.loadAlignmentState(for: project.id)
         engine.loadProjectFromDisk(projectID: project.id, settings: captureSettings) { poses in
             loadedPoses = poses
             isLoading = false
@@ -838,13 +879,18 @@ struct ProjectScansSheetView: View {
 }
 
 struct FullScreen3DViewerView: View {
+    let projectID: UUID
     let title: String
     @ObservedObject var engine: MetalPointCloudEngine
     let trajectoryPoses: [simd_float4x4]
     let currentPose: simd_float4x4
+    @Binding var alignmentState: ProjectAlignmentState
+    var onAlignmentUpdated: (([simd_float4x4]) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var showTrajectory = true
+    @State private var showCameraFrustums = false
+    @State private var showCropControls = false
     @State private var pointSize: Float = 3.4
 
     var body: some View {
@@ -855,6 +901,8 @@ struct FullScreen3DViewerView: View {
                 currentPose: currentPose,
                 showLiveFrustum: false,
                 showTrajectory: showTrajectory,
+                showCameraFrustums: showCameraFrustums,
+                cropBox: alignmentState.cropBox,
                 pointSize: pointSize
             )
             .ignoresSafeArea()
@@ -886,13 +934,34 @@ struct FullScreen3DViewerView: View {
                 .padding()
 
                 HStack {
-                    Button {
-                        showTrajectory.toggle()
-                    } label: {
-                        Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
-                            .font(.subheadline)
-                            .frame(width: 42, height: 42)
-                            .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
+                    VStack(spacing: 12) {
+                        Button {
+                            showTrajectory.toggle()
+                        } label: {
+                            Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            showCameraFrustums.toggle()
+                            if showCameraFrustums { showTrajectory = true }
+                        } label: {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(showCameraFrustums ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            withAnimation { showCropControls.toggle() }
+                        } label: {
+                            Image(systemName: "crop")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background((showCropControls || alignmentState.cropBox.isEnabled) ? Color.orange.opacity(0.55) : Color.black.opacity(0.45), in: Circle())
+                        }
                     }
                     .padding(.leading, 14)
 
@@ -900,8 +969,116 @@ struct FullScreen3DViewerView: View {
                 }
 
                 Spacer()
+
+                if showCropControls {
+                    CropBoxControlsPanel(
+                        cropBox: $alignmentState.cropBox,
+                        onFitToScan: {
+                            engine.computeCloudBounds(state: alignmentState) { center, size in
+                                alignmentState.cropBox.centerX = center.x
+                                alignmentState.cropBox.centerY = center.y
+                                alignmentState.cropBox.centerZ = center.z
+                                alignmentState.cropBox.sizeX = size.x
+                                alignmentState.cropBox.sizeY = size.y
+                                alignmentState.cropBox.sizeZ = size.z
+                                alignmentState.cropBox.yawDegrees = 0
+                                alignmentState.cropBox.isEnabled = true
+                                applyAndSaveCrop()
+                            }
+                        },
+                        onChanged: {
+                            applyAndSaveCrop()
+                        }
+                    )
+                    .padding(.horizontal)
+                    .padding(.bottom, 12)
+                }
             }
         }
+    }
+
+    private func applyAndSaveCrop() {
+        ScanProjectStore.shared.saveAlignmentState(alignmentState, for: projectID)
+        engine.applyAlignmentState(alignmentState) { poses in
+            onAlignmentUpdated?(poses)
+        }
+    }
+}
+
+struct CropBoxControlsPanel: View {
+    @Binding var cropBox: CropBox3D
+    let onFitToScan: () -> Void
+    let onChanged: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Toggle("3D Crop Box", isOn: $cropBox.isEnabled)
+                    .font(.subheadline.bold())
+                    .onChange(of: cropBox.isEnabled) { _, _ in onChanged() }
+
+                Spacer()
+
+                Button("Fit to Scan") {
+                    onFitToScan()
+                }
+                .font(.caption.bold())
+                .buttonStyle(.bordered)
+            }
+
+            if cropBox.isEnabled {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Center X: %.2f m", cropBox.centerX))
+                            .font(.caption2)
+                        Slider(value: $cropBox.centerX, in: -10...10, step: 0.05)
+                            .onChange(of: cropBox.centerX) { _, _ in onChanged() }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Size X: %.2f m", cropBox.sizeX))
+                            .font(.caption2)
+                        Slider(value: $cropBox.sizeX, in: 0.3...20, step: 0.1)
+                            .onChange(of: cropBox.sizeX) { _, _ in onChanged() }
+                    }
+                }
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Center Y: %.2f m", cropBox.centerY))
+                            .font(.caption2)
+                        Slider(value: $cropBox.centerY, in: -10...10, step: 0.05)
+                            .onChange(of: cropBox.centerY) { _, _ in onChanged() }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Size Y: %.2f m", cropBox.sizeY))
+                            .font(.caption2)
+                        Slider(value: $cropBox.sizeY, in: 0.3...20, step: 0.1)
+                            .onChange(of: cropBox.sizeY) { _, _ in onChanged() }
+                    }
+                }
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Center Z: %.2f m", cropBox.centerZ))
+                            .font(.caption2)
+                        Slider(value: $cropBox.centerZ, in: -10...10, step: 0.05)
+                            .onChange(of: cropBox.centerZ) { _, _ in onChanged() }
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(format: "Size Z: %.2f m", cropBox.sizeZ))
+                            .font(.caption2)
+                        Slider(value: $cropBox.sizeZ, in: 0.3...20, step: 0.1)
+                            .onChange(of: cropBox.sizeZ) { _, _ in onChanged() }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(format: "Rotate Yaw: %.0f°", cropBox.yawDegrees))
+                        .font(.caption2)
+                    Slider(value: $cropBox.yawDegrees, in: -180...180, step: 1)
+                        .onChange(of: cropBox.yawDegrees) { _, _ in onChanged() }
+                }
+            }
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 }
 

@@ -60,7 +60,7 @@ struct CaptureView: View {
                 captureManager.onKeyframeCaptured = { frame in
                     engine.processCapturedKeyframe(frame, settings: captureManager.settings)
                 }
-                captureManager.startSession()
+                captureManager.startSession(for: project.id)
             }
             .onDisappear {
                 UIApplication.shared.isIdleTimerDisabled = false
@@ -82,7 +82,7 @@ struct CaptureView: View {
                 },
                 onScanAnotherPass: {
                     showScanComplete = false
-                    captureManager.startSession()
+                    captureManager.startSession(for: project.id)
                 }
             )
         }

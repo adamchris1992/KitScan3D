@@ -39,6 +39,7 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
     var onKeyframeCaptured: ((ARFrame) -> Void)?
 
     private var activeProjectID: UUID?
+    private var sessionProjectID: UUID?
     private var lastKeyframeTime: TimeInterval = 0
     private var lastKeyframePose: simd_float4x4?
     private var pendingManualShot = false
@@ -56,7 +57,7 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
 
     // MARK: - Session
 
-    func startSession() {
+    func startSession(for projectID: UUID? = nil) {
         guard Self.isLiDARSupported else {
             logger.log(.error, category: "ARKit", "Device does not support LiDAR sceneDepth.")
             trackingStatus = TrackingRecoveryStatus(
@@ -67,12 +68,22 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
             return
         }
 
+        sessionProjectID = projectID
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = []
         config.worldAlignment = .gravity
         config.frameSemantics.insert(.sceneDepth)
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
             config.frameSemantics.insert(.smoothedSceneDepth)
+        }
+
+        if let pid = projectID {
+            let mapURL = ScanProjectStore.shared.worldMapURL(for: pid)
+            if let data = try? Data(contentsOf: mapURL),
+               let worldMap = try? NSKeyedUnarchiver.unarchivedObject(ofClass: ARWorldMap.self, from: data) {
+                config.initialWorldMap = worldMap
+                logger.log(.info, category: "ARKit", "Loaded saved ARWorldMap for multi-pass relocalization")
+            }
         }
 
         if let format = bestVideoFormat(for: settings.resolution) {
@@ -106,7 +117,7 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
     func applyResolution(_ preset: ResolutionPreset) {
         settings.resolution = preset
         if isSessionRunning {
-            startSession()
+            startSession(for: sessionProjectID)
         }
     }
 
@@ -164,10 +175,26 @@ final class ARCaptureSessionManager: NSObject, ObservableObject {
             logger.log(.info, category: "Capture", "Discarded empty pass")
         } else {
             saveCurrentScanStats()
+            saveWorldMap(for: projectID)
             logger.log(.info, category: "Capture", "Recording finished. Total keyframes: \(capturedFrameCount)")
         }
         currentScan = nil
         activeProjectID = nil
+    }
+
+    private func saveWorldMap(for projectID: UUID) {
+        session.getCurrentWorldMap { [weak self] worldMap, error in
+            guard let worldMap else {
+                if let error {
+                    self?.logger.log(.debug, category: "ARKit", "WorldMap not saved: \(error.localizedDescription)")
+                }
+                return
+            }
+            if let data = try? NSKeyedArchiver.archivedData(withRootObject: worldMap, requiringSecureCoding: true) {
+                try? data.write(to: ScanProjectStore.shared.worldMapURL(for: projectID), options: .atomic)
+                self?.logger.log(.info, category: "ARKit", "Saved ARWorldMap (\(data.count / 1024) KB)")
+            }
+        }
     }
 
     func triggerManualShot() {

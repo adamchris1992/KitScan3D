@@ -63,4 +63,31 @@ final class KitScan3DTests: XCTestCase {
         settings.manualSpacingMeters = 0.001
         XCTAssertEqual(VoxelHash.voxelSpacing(for: settings), 0.002, accuracy: 0.0001)
     }
+
+    func testCropBoxContainsAndYaw() {
+        var box = CropBox3D(isEnabled: true, centerX: 0, centerY: 0, centerZ: 0, sizeX: 2, sizeY: 2, sizeZ: 2, yawDegrees: 0)
+        XCTAssertTrue(box.contains(SIMD3<Float>(0.5, 0.5, 0.5)))
+        XCTAssertFalse(box.contains(SIMD3<Float>(1.5, 0.0, 0.0)))
+
+        box.yawDegrees = 45
+        XCTAssertTrue(box.contains(SIMD3<Float>(1.1, 0.0, 0.0)) == false)
+        XCTAssertTrue(box.contains(SIMD3<Float>(0.6, 0.0, 0.6)))
+    }
+
+    func testICPAlignmentRecoversTranslation() {
+        var target: [SIMD3<Float>] = []
+        for x in Swift.stride(from: Float(-1), through: Float(1), by: Float(0.25)) {
+            for y in Swift.stride(from: Float(-1), through: Float(1), by: Float(0.25)) {
+                target.append(SIMD3<Float>(x, y, 0.2 * x))
+            }
+        }
+        let offset = SIMD3<Float>(0.08, -0.05, 0.04)
+        let source = target.map { $0 - offset }
+        let res = PointCloudRegistration.alignICP(source: source, target: target, iterations: 20, maxDistance: 0.3)
+        XCTAssertGreaterThanOrEqual(res.inlierCount, 12)
+        XCTAssertLessThan(res.rmse, 0.02)
+        XCTAssertEqual(res.transform.columns.3.x, offset.x, accuracy: 0.02)
+        XCTAssertEqual(res.transform.columns.3.y, offset.y, accuracy: 0.02)
+        XCTAssertEqual(res.transform.columns.3.z, offset.z, accuracy: 0.02)
+    }
 }
