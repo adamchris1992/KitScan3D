@@ -52,6 +52,8 @@ struct UnprojectUniforms {
     var minConfidence: UInt32
     var stride: UInt32
     var maxOutputPoints: UInt32
+    var frameIndex: UInt32
+    var maxEdgeJumpMeters: Float
 }
 
 struct Scene3DUniforms {
@@ -86,10 +88,12 @@ final class MetalPointCloudEngine: ObservableObject {
 
     private let accumulatorQueue = DispatchQueue(label: "com.kitscan3d.voxelaccumulator", qos: .userInitiated)
     private var voxelMap: [Int64: PointVertex] = [:]
+    private var voxelCounts: [Int64: UInt16] = [:]
     private var coverageVoxels: Set<Int64> = []
     private let coverageVoxelSpacing: Float = 0.04
     private let covWidth = 128
     private let covHeight = 96
+    private var unprojectFrameCounter: UInt32 = 0
 
     @Published private(set) var totalPointCount: Int = 0
     @Published private(set) var preview2DPoints: [SIMD2<Float>] = []
@@ -238,6 +242,7 @@ final class MetalPointCloudEngine: ObservableObject {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
             self.voxelMap.removeAll(keepingCapacity: false)
+            self.voxelCounts.removeAll(keepingCapacity: false)
             self.coverageVoxels.removeAll(keepingCapacity: false)
             var zeros = [UInt8](repeating: 0, count: self.covWidth * self.covHeight)
             self.coverageTexture?.replace(
@@ -315,6 +320,7 @@ final class MetalPointCloudEngine: ObservableObject {
         )
 
         let stride: UInt32 = settings.manualSpacingMeters <= 0.005 ? 1 : 2
+        unprojectFrameCounter &+= 1
         var uniforms = UnprojectUniforms(
             cameraTransform: frame.camera.transform,
             fx: intrinsics.columns.0.x,
@@ -329,7 +335,9 @@ final class MetalPointCloudEngine: ObservableObject {
             farClip: settings.farClipMeters,
             minConfidence: UInt32(settings.minDepthConfidence),
             stride: stride,
-            maxOutputPoints: UInt32(maxStagingPoints)
+            maxOutputPoints: UInt32(maxStagingPoints),
+            frameIndex: unprojectFrameCounter,
+            maxEdgeJumpMeters: 0.08
         )
 
         encoder.setComputePipelineState(pipeline)
@@ -378,15 +386,19 @@ final class MetalPointCloudEngine: ObservableObject {
                     }
                     let key = VoxelHash.key(for: pos, spacing: spacing)
                     if let existing = self.voxelMap[key] {
-                        // Temporal blend smooths overlapping passes and reduces depth waviness
+                        // True running-mean voxel averaging (capped at 16 samples)
+                        let n = min(UInt16(16), (self.voxelCounts[key] ?? 1) &+ 1)
+                        let w = 1.0 / Float(n)
                         let ePos = existing.simdPosition
                         let eCol = SIMD3<Float>(existing.color.0, existing.color.1, existing.color.2)
                         let nCol = SIMD3<Float>(pt.color.0, pt.color.1, pt.color.2)
-                        let blendedPos = ePos * 0.75 + pos * 0.25
-                        let blendedCol = eCol * 0.75 + nCol * 0.25
-                        self.voxelMap[key] = PointVertex(position: blendedPos, color: blendedCol)
+                        let meanPos = ePos + (pos - ePos) * w
+                        let meanCol = eCol + (nCol - eCol) * w
+                        self.voxelMap[key] = PointVertex(position: meanPos, color: meanCol)
+                        self.voxelCounts[key] = n
                     } else if self.voxelMap.count < budget {
                         self.voxelMap[key] = pt
+                        self.voxelCounts[key] = 1
                     }
                     self.coverageVoxels.insert(VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing))
                 }

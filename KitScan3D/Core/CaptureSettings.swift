@@ -72,7 +72,7 @@ struct CaptureSettings: Codable, Equatable {
     // Depth Clipping (0 - 20 m)
     var nearClipMeters: Float = 0.20
     var farClipMeters: Float = 5.00
-    var minDepthConfidence: Int = 1 // 0 = low, 1 = medium, 2 = high
+    var minDepthConfidence: Int = 2 // 0 = low, 1 = medium, 2 = high
 
     // Point Cloud Density & Budget
     var spacingMode: PointSpacingMode = .adaptive

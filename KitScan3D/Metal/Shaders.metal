@@ -39,6 +39,8 @@ struct UnprojectUniforms {
     uint minConfidence;
     uint stride;
     uint maxOutputPoints;
+    uint frameIndex;
+    float maxEdgeJumpMeters;
 };
 
 struct Scene3DUniforms {
@@ -125,14 +127,17 @@ kernel void unprojectDepthKernel(texture2d<float, access::read> yTexture [[textu
                                  device PointVertex *outPoints [[buffer(1)]],
                                  device atomic_uint *outCount [[buffer(2)]],
                                  uint2 gid [[thread_position_in_grid]]) {
-    uint dx = gid.x * u.stride;
-    uint dy = gid.y * u.stride;
+    // Per-frame jittered offset breaks up regular grid Moire on flat walls
+    uint jx = (u.stride > 1) ? ((gid.x * 73856093u ^ gid.y * 19349663u ^ u.frameIndex * 83492791u) % u.stride) : 0;
+    uint jy = (u.stride > 1) ? ((gid.x * 2971215073u ^ gid.y * 486187739u ^ u.frameIndex * 15485863u) % u.stride) : 0;
+    uint dx = gid.x * u.stride + jx;
+    uint dy = gid.y * u.stride + jy;
     if (dx >= u.depthWidth || dy >= u.depthHeight) {
         return;
     }
 
-    float depth = depthTexture.read(uint2(dx, dy)).r;
-    if (isnan(depth) || depth <= 0.0 || depth < u.nearClip || depth > u.farClip) {
+    float rawDepth = depthTexture.read(uint2(dx, dy)).r;
+    if (isnan(rawDepth) || rawDepth <= 0.0 || rawDepth < u.nearClip || rawDepth > u.farClip) {
         return;
     }
 
@@ -140,6 +145,34 @@ kernel void unprojectDepthKernel(texture2d<float, access::read> yTexture [[textu
     if (conf < u.minConfidence) {
         return;
     }
+
+    // 3x3 edge-preserving bilateral smooth + flying-pixel discontinuity rejection
+    float sumW = 1.0;
+    float sumD = rawDepth;
+    uint jumpCount = 0;
+    for (int oy = -1; oy <= 1; ++oy) {
+        for (int ox = -1; ox <= 1; ++ox) {
+            if (ox == 0 && oy == 0) continue;
+            int nx = int(dx) + ox;
+            int ny = int(dy) + oy;
+            if (nx < 0 || ny < 0 || nx >= int(u.depthWidth) || ny >= int(u.depthHeight)) continue;
+            float nd = depthTexture.read(uint2(uint(nx), uint(ny))).r;
+            if (isnan(nd) || nd <= 0.0) continue;
+            float diff = abs(nd - rawDepth);
+            if (diff > u.maxEdgeJumpMeters) {
+                jumpCount++;
+            } else {
+                float rangeW = exp(-(diff * diff) / 0.0008);
+                sumD += nd * rangeW;
+                sumW += rangeW;
+            }
+        }
+    }
+    // Reject flying pixels sitting on sharp depth discontinuities
+    if (jumpCount >= 4) {
+        return;
+    }
+    float depth = sumD / sumW;
 
     float scaleX = float(u.rgbWidth) / float(u.depthWidth);
     float scaleY = float(u.rgbHeight) / float(u.depthHeight);
@@ -179,17 +212,22 @@ vertex PointVertexOut pointCloudVertex(uint vid [[vertex_id]],
     PointVertexOut out;
     out.position = u.viewProjection * float4(float3(v.position), 1.0);
     out.color = float3(v.color);
-    out.pointSize = u.pointSize;
+    // Perspective-scaled point size so close-up points fill cleanly without chunkiness
+    float dist = max(0.35, out.position.w);
+    out.pointSize = clamp(u.pointSize * 2.8 / dist, 2.0, 14.0);
     return out;
 }
 
 fragment float4 pointCloudFragment(PointVertexOut in [[stage_in]],
                                    float2 pointCoord [[point_coord]]) {
     float2 centered = pointCoord - float2(0.5);
-    if (dot(centered, centered) > 0.25) {
+    float r2 = dot(centered, centered);
+    if (r2 > 0.25) {
         discard_fragment();
     }
-    return float4(in.color, 1.0);
+    // Subtle soft splat shading toward the rim for smoother surface appearance
+    float rim = 1.0 - smoothstep(0.12, 0.25, r2) * 0.18;
+    return float4(in.color * rim, 1.0);
 }
 
 struct LineVertexOut {
