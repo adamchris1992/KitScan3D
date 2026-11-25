@@ -1,7 +1,7 @@
 import Foundation
 
 enum ResolutionPreset: String, CaseIterable, Codable, Identifiable {
-    case fullHD1080p = "1080p"
+    case fullHD1080p = "FHD"
     case uhd4K = "4K"
 
     var id: String { rawValue }
@@ -81,7 +81,7 @@ struct CaptureSettings: Codable, Equatable {
 
     // Viewfinder Overlays
     var showLiveDepthPreview: Bool = false
-    var showCoverageOverlay: Bool = true
+    var showCoverageOverlay: Bool = false
 
     mutating func applyPreset(_ preset: ScanPreset) {
         switch preset {

@@ -80,10 +80,6 @@ struct CaptureView: View {
             .onAppear {
                 captureManager.onFrameUpdate = { frame in
                     engine.updateLiveFrame(frame, viewportSize: geo.size)
-                    frameTick &+= 1
-                    if captureManager.settings.showCoverageOverlay && frameTick % 6 == 0 {
-                        engine.updateCoverageMask(for: frame, settings: captureManager.settings)
-                    }
                 }
                 captureManager.onKeyframeCaptured = { frame, _ in
                     engine.processCapturedKeyframe(frame, settings: captureManager.settings)
@@ -306,28 +302,6 @@ struct CaptureView: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        captureManager.settings.showLiveDepthPreview.toggle()
-                    } label: {
-                        QuickBarChip(
-                            icon: "arrow.up.and.down",
-                            title: "Depth",
-                            isActive: captureManager.settings.showLiveDepthPreview
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        captureManager.settings.showCoverageOverlay.toggle()
-                    } label: {
-                        QuickBarChip(
-                            icon: "square.grid.2x2",
-                            title: "Coverage",
-                            isActive: captureManager.settings.showCoverageOverlay
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
                         mapMode = mapMode == .hidden ? .map2D : .hidden
                     } label: {
                         QuickBarChip(
@@ -514,33 +488,13 @@ struct ScanCompleteResultView: View {
                 .padding()
 
                 HStack {
-                    VStack(spacing: 12) {
-                        Button {
-                            showTrajectory.toggle()
-                        } label: {
-                            Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
-                        }
-
-                        Button {
-                            pointSize = min(6.0, pointSize + 0.6)
-                        } label: {
-                            Image(systemName: "plus.magnifyingglass")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(Color.black.opacity(0.45), in: Circle())
-                        }
-
-                        Button {
-                            pointSize = max(1.6, pointSize - 0.6)
-                        } label: {
-                            Image(systemName: "minus.magnifyingglass")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(Color.black.opacity(0.45), in: Circle())
-                        }
+                    Button {
+                        showTrajectory.toggle()
+                    } label: {
+                        Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.subheadline)
+                            .frame(width: 42, height: 42)
+                            .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
                     }
                     .padding(.leading, 14)
 

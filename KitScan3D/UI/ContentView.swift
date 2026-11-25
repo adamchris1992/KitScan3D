@@ -353,6 +353,8 @@ struct ProjectDetailView: View {
     @State private var renameText = ""
     @State private var showDeleteConfirm = false
     @State private var displayTitle: String = ""
+    @State private var isExportingPLY = false
+    @State private var exportedPLYURL: URL?
 
     var body: some View {
         ZStack {
@@ -431,6 +433,22 @@ struct ProjectDetailView: View {
                         )
                     }
                     .buttonStyle(.plain)
+
+                    // Export PLY Card
+                    Button {
+                        exportPLY()
+                    } label: {
+                        ProjectActionRow(
+                            icon: "square.and.arrow.up",
+                            iconColor: .white,
+                            badgeColor: Color.blue.opacity(0.28),
+                            title: isExportingPLY ? "Exporting PLY..." : "Export PLY",
+                            subtitle: "Save or share binary .ply point cloud"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(scans.isEmpty || isExportingPLY)
+                    .opacity(scans.isEmpty ? 0.5 : 1.0)
 
                     // Delete Project Card
                     Button {
@@ -535,6 +553,43 @@ struct ProjectDetailView: View {
                 currentPose: loadedPoses.last ?? matrix_identity_float4x4
             )
         }
+        .sheet(isPresented: Binding(
+            get: { exportedPLYURL != nil },
+            set: { if !$0 { exportedPLYURL = nil } }
+        )) {
+            if let url = exportedPLYURL {
+                ShareSheet(items: [url])
+            }
+        }
+    }
+
+    private func exportPLY() {
+        isExportingPLY = true
+        let safeName = (displayTitle.isEmpty ? project.name : displayTitle)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+        let outURL = ScanProjectStore.shared
+            .projectDirectory(for: project.id)
+            .appendingPathComponent("exports/\(safeName).ply")
+
+        engine.loadProjectFromDisk(projectID: project.id, settings: captureManager.settings) { _ in
+            engine.exportCurrentPointsSnapshot { points in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try PLYExporter.exportBinaryPLY(points: points, to: outURL)
+                        DispatchQueue.main.async {
+                            isExportingPLY = false
+                            exportedPLYURL = outURL
+                        }
+                    } catch {
+                        DiagnosticsLogger.shared.log(.error, category: "Export", "PLY export failed: \(error.localizedDescription)")
+                        DispatchQueue.main.async {
+                            isExportingPLY = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func reloadProjectPreview() {
@@ -616,7 +671,7 @@ struct ResolutionPickerOverlay: View {
                         VStack(spacing: 8) {
                             Image(systemName: "viewfinder")
                                 .font(.title2)
-                            Text("1080p")
+                            Text("FHD")
                                 .font(.headline)
                             Text("1920 × 1440 • 60 fps")
                                 .font(.caption2)
@@ -636,7 +691,7 @@ struct ResolutionPickerOverlay: View {
                                 .font(.title2)
                             Text("4K")
                                 .font(.headline)
-                            Text("Full sensor • 30 fps")
+                            Text("3840 × 2160 • 30 fps")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -830,33 +885,13 @@ struct FullScreen3DViewerView: View {
                 .padding()
 
                 HStack {
-                    VStack(spacing: 12) {
-                        Button {
-                            showTrajectory.toggle()
-                        } label: {
-                            Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
-                        }
-
-                        Button {
-                            pointSize = min(6.0, pointSize + 0.6)
-                        } label: {
-                            Image(systemName: "plus.magnifyingglass")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(Color.black.opacity(0.45), in: Circle())
-                        }
-
-                        Button {
-                            pointSize = max(1.6, pointSize - 0.6)
-                        } label: {
-                            Image(systemName: "minus.magnifyingglass")
-                                .font(.subheadline)
-                                .frame(width: 42, height: 42)
-                                .background(Color.black.opacity(0.45), in: Circle())
-                        }
+                    Button {
+                        showTrajectory.toggle()
+                    } label: {
+                        Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.subheadline)
+                            .frame(width: 42, height: 42)
+                            .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
                     }
                     .padding(.leading, 14)
 
@@ -867,4 +902,14 @@ struct FullScreen3DViewerView: View {
             }
         }
     }
+}
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

@@ -427,6 +427,19 @@ final class MetalPointCloudEngine: ObservableObject {
         return (renderPointBuffer, renderPointCount)
     }
 
+    func exportCurrentPointsSnapshot(completion: @escaping ([PointVertex]) -> Void) {
+        accumulatorQueue.async { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            let pts = Array(self.voxelMap.values)
+            DispatchQueue.main.async {
+                completion(pts)
+            }
+        }
+    }
+
     /// Merges a point into the voxel hash using a running mean of position and color.
     private func accumulatePoint(_ pt: PointVertex, spacing: Float, budget: Int) {
         let pos = pt.simdPosition
