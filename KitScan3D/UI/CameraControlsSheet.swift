@@ -7,21 +7,21 @@ struct CameraControlsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Resolution") {
-                    Picker("Resolution", selection: Binding(
-                        get: { captureManager.settings.resolution },
-                        set: { captureManager.applyResolution($0) }
+                Section("Scan Profile") {
+                    Picker("Mode", selection: Binding(
+                        get: { captureManager.settings.profile },
+                        set: { captureManager.settings.applyProfile($0) }
                     )) {
-                        ForEach(captureManager.availableResolutions) { res in
-                            Text(res.rawValue).tag(res)
+                        ForEach(ScanProfile.allCases) { p in
+                            Text(p.rawValue).tag(p)
                         }
                     }
                     .pickerStyle(.segmented)
 
                     HStack {
-                        Text("Lens")
+                        Text("Camera")
                         Spacer()
-                        Text("24 mm (Wide)")
+                        Text("4K • 24 mm Wide")
                             .foregroundStyle(.secondary)
                     }
                 }

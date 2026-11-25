@@ -27,9 +27,17 @@ enum PointSpacingMode: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ScanProfile: String, CaseIterable, Codable, Identifiable {
+    case roomScene = "Room / Scene"
+    case objectOrbit = "Object Orbit"
+
+    var id: String { rawValue }
+}
+
 struct CaptureSettings: Codable, Equatable {
-    // Resolution
-    var resolution: ResolutionPreset = .fullHD1080p
+    // Resolution (always 4K for maximum texture detail)
+    var resolution: ResolutionPreset = .uhd4K
+    var profile: ScanProfile = .roomScene
 
     // Exposure & White Balance
     var isAutoMagicLocked: Bool = true
@@ -55,18 +63,37 @@ struct CaptureSettings: Codable, Equatable {
     var manualSpacingMeters: Float = 0.005 // 1 mm (0.001) to 5 cm (0.05)
     var maxPointBudget: Int = 3_000_000
 
-    /// Restores scan-quality defaults while keeping the chosen resolution and current exposure lock state.
+    /// Applies Room/Scene or Object Orbit (max detail) scan settings.
+    mutating func applyProfile(_ newProfile: ScanProfile) {
+        profile = newProfile
+        switch newProfile {
+        case .roomScene:
+            captureMode = .scanAndGo
+            scanAndGoIntervalSeconds = 0.16
+            scanAndGoMinTranslationMeters = 0.05
+            scanAndGoMinRotationDegrees = 4.0
+            nearClipMeters = 0.20
+            farClipMeters = 5.00
+            minDepthConfidence = 2
+            spacingMode = .adaptive
+            manualSpacingMeters = 0.005
+            maxPointBudget = 3_000_000
+        case .objectOrbit:
+            captureMode = .scanAndGo
+            scanAndGoIntervalSeconds = 0.10
+            scanAndGoMinTranslationMeters = 0.025
+            scanAndGoMinRotationDegrees = 2.5
+            nearClipMeters = 0.20
+            farClipMeters = 1.00
+            minDepthConfidence = 2
+            spacingMode = .manual
+            manualSpacingMeters = 0.002
+            maxPointBudget = 4_000_000
+        }
+    }
+
+    /// Restores scan-quality defaults for the active profile while keeping exposure lock state.
     mutating func resetScanDefaults() {
-        let defaults = CaptureSettings()
-        captureMode = defaults.captureMode
-        scanAndGoIntervalSeconds = defaults.scanAndGoIntervalSeconds
-        scanAndGoMinTranslationMeters = defaults.scanAndGoMinTranslationMeters
-        scanAndGoMinRotationDegrees = defaults.scanAndGoMinRotationDegrees
-        nearClipMeters = defaults.nearClipMeters
-        farClipMeters = defaults.farClipMeters
-        minDepthConfidence = defaults.minDepthConfidence
-        spacingMode = defaults.spacingMode
-        manualSpacingMeters = defaults.manualSpacingMeters
-        maxPointBudget = defaults.maxPointBudget
+        applyProfile(profile)
     }
 }

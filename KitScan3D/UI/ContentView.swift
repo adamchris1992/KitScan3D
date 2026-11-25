@@ -357,7 +357,7 @@ struct ProjectDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var scans: [ScanSessionMetadata] = []
-    @State private var showResolutionPicker = false
+    @State private var showModePicker = false
     @State private var showCapture = false
     @State private var showScansSheet = false
     @State private var showFullScreen3D = false
@@ -425,14 +425,14 @@ struct ProjectDetailView: View {
 
                     // Start Capturing Card
                     Button {
-                        showResolutionPicker = true
+                        showModePicker = true
                     } label: {
                         ProjectActionRow(
                             icon: "camera.fill",
                             iconColor: .white,
                             badgeColor: AppTheme.badge,
                             title: "Start Capturing",
-                            subtitle: "Continuous Scan & Go or manual single shots"
+                            subtitle: "Room / Scene or Object Orbit (Max Detail)"
                         )
                     }
                     .buttonStyle(.plain)
@@ -499,15 +499,16 @@ struct ProjectDetailView: View {
                 .padding()
             }
 
-            if showResolutionPicker {
-                ResolutionPickerOverlay(
-                    onSelect: { res in
-                        captureManager.applyResolution(res)
-                        showResolutionPicker = false
+            if showModePicker {
+                ScanModePickerOverlay(
+                    onSelect: { profile in
+                        captureManager.settings.resolution = .uhd4K
+                        captureManager.settings.applyProfile(profile)
+                        showModePicker = false
                         showCapture = true
                     },
                     onCancel: {
-                        showResolutionPicker = false
+                        showModePicker = false
                     }
                 )
             }
@@ -727,8 +728,8 @@ struct ProjectActionRow: View {
     }
 }
 
-struct ResolutionPickerOverlay: View {
-    let onSelect: (ResolutionPreset) -> Void
+struct ScanModePickerOverlay: View {
+    let onSelect: (ScanProfile) -> Void
     let onCancel: () -> Void
 
     var body: some View {
@@ -738,23 +739,23 @@ struct ResolutionPickerOverlay: View {
                 .onTapGesture { onCancel() }
 
             VStack(spacing: 18) {
-                Text("Choose Capture Resolution")
+                Text("Choose Scan Mode")
                     .font(.title3.bold())
-                Text("Select image quality before starting the camera.")
+                Text("All captures record in 4K. Pick the preset that fits your subject.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
 
                 HStack(spacing: 12) {
                     Button {
-                        onSelect(.fullHD1080p)
+                        onSelect(.roomScene)
                     } label: {
                         VStack(spacing: 8) {
-                            Image(systemName: "viewfinder")
+                            Image(systemName: "house")
                                 .font(.title2)
-                            Text("FHD")
+                            Text("Room / Scene")
                                 .font(.headline)
-                            Text("1920 × 1440 • 60 fps")
+                            Text("0.2 – 5.0 m • Adaptive")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
@@ -765,14 +766,15 @@ struct ResolutionPickerOverlay: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        onSelect(.uhd4K)
+                        onSelect(.objectOrbit)
                     } label: {
                         VStack(spacing: 8) {
-                            Image(systemName: "sparkles.tv")
+                            Image(systemName: "cube.transparent")
                                 .font(.title2)
-                            Text("4K")
+                                .foregroundStyle(.cyan)
+                            Text("Object Orbit")
                                 .font(.headline)
-                            Text("3840 × 2160 • 30 fps")
+                            Text("0.2 – 1.0 m • 2 mm Max")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }

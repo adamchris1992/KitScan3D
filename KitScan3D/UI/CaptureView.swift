@@ -133,7 +133,7 @@ struct CaptureView: View {
 
     private var statusSubRow: some View {
         HStack {
-            Label(captureManager.settings.resolution.rawValue, systemImage: "camera.aperture")
+            Label("4K • \(captureManager.settings.profile.rawValue)", systemImage: captureManager.settings.profile == .objectOrbit ? "cube.transparent" : "camera.aperture")
                 .font(.caption2.bold())
                 .lineLimit(1)
                 .padding(.horizontal, 10)
