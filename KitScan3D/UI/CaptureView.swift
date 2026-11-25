@@ -8,6 +8,13 @@ enum MapOverlayMode: String, CaseIterable {
     case view3D = "3D"
 }
 
+enum LiveCameraAdjustment: String, CaseIterable {
+    case whiteBalance = "White Balance"
+    case shutter = "Shutter"
+    case iso = "ISO"
+    case exposureBias = "Exposure"
+}
+
 struct CaptureView: View {
     let project: ScanProjectMetadata
     @ObservedObject var captureManager: ARCaptureSessionManager
@@ -19,6 +26,7 @@ struct CaptureView: View {
     @State private var mapMode: MapOverlayMode = .map2D
     @State private var showScanComplete = false
     @State private var toastMessage: String?
+    @State private var activeAdjustment: LiveCameraAdjustment? = nil
 
     var body: some View {
         GeometryReader { geo in
@@ -236,34 +244,68 @@ struct CaptureView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 10) {
-            // Compact Camera Quick-Bar matching Design mockups
+            if let activeAdjustment {
+                liveAdjustmentSlider(for: activeAdjustment)
+            }
+
+            // Compact Camera Quick-Bar with live inline adjustments
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 14) {
                     Button {
+                        activeAdjustment = nil
                         captureManager.unlockAndRemeterAutoMagic()
                         showToast("Re-metering exposure & WB...")
                     } label: {
                         QuickBarChip(
                             icon: "sparkles",
                             title: captureManager.settings.isAutoMagicLocked ? "Locked" : "Auto",
-                            isActive: captureManager.settings.isAutoMagicLocked
+                            isActive: captureManager.settings.isAutoMagicLocked && !captureManager.settings.useManualControls
                         )
                     }
                     .buttonStyle(.plain)
 
-                    Button { showSettingsSheet = true } label: {
-                        QuickBarChip(icon: "thermometer.medium", title: "\(Int(captureManager.settings.whiteBalanceKelvin))K", isActive: false)
+                    Button {
+                        toggleAdjustment(.whiteBalance)
+                    } label: {
+                        QuickBarChip(
+                            icon: "thermometer.medium",
+                            title: "\(Int(captureManager.settings.whiteBalanceKelvin))K",
+                            isActive: activeAdjustment == .whiteBalance
+                        )
                     }
                     .buttonStyle(.plain)
 
-                    Button { showSettingsSheet = true } label: {
+                    Button {
+                        toggleAdjustment(.shutter)
+                    } label: {
                         let inv = Int(round(1.0 / max(0.0001, captureManager.settings.manualExposureDurationSeconds)))
-                        QuickBarChip(icon: "timer", title: "1/\(inv)", isActive: false)
+                        QuickBarChip(
+                            icon: "timer",
+                            title: "1/\(inv)",
+                            isActive: activeAdjustment == .shutter
+                        )
                     }
                     .buttonStyle(.plain)
 
-                    Button { showSettingsSheet = true } label: {
-                        QuickBarChip(icon: "dial.low", title: "ISO \(Int(captureManager.settings.manualISO))", isActive: false)
+                    Button {
+                        toggleAdjustment(.iso)
+                    } label: {
+                        QuickBarChip(
+                            icon: "dial.low",
+                            title: "ISO \(Int(captureManager.settings.manualISO))",
+                            isActive: activeAdjustment == .iso
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        toggleAdjustment(.exposureBias)
+                    } label: {
+                        QuickBarChip(
+                            icon: "plusminus",
+                            title: String(format: "%+.1f", captureManager.settings.exposureBias),
+                            isActive: activeAdjustment == .exposureBias
+                        )
                     }
                     .buttonStyle(.plain)
 
@@ -359,6 +401,81 @@ struct CaptureView: View {
                 }
             }
             .padding(.bottom, 8)
+        }
+    }
+
+    private func toggleAdjustment(_ adj: LiveCameraAdjustment) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            if activeAdjustment == adj {
+                activeAdjustment = nil
+            } else {
+                activeAdjustment = adj
+                captureManager.settings.useManualControls = true
+                captureManager.settings.isAutoMagicLocked = false
+                captureManager.applyManualCameraControls()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func liveAdjustmentSlider(for adj: LiveCameraAdjustment) -> some View {
+        let bounds = captureManager.hardwareBounds
+        VStack(spacing: 6) {
+            HStack {
+                Text(adj.rawValue)
+                    .font(.caption.bold())
+                Spacer()
+                Text(adjustmentValueLabel(for: adj))
+                    .font(.caption.monospacedDigit().bold())
+                    .foregroundStyle(.green)
+                Button {
+                    withAnimation { activeAdjustment = nil }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            switch adj {
+            case .iso:
+                Slider(value: $captureManager.settings.manualISO, in: bounds.minISO...bounds.maxISO)
+                    .onChange(of: captureManager.settings.manualISO) { _, _ in
+                        captureManager.applyManualCameraControls()
+                    }
+            case .shutter:
+                Slider(value: $captureManager.settings.manualExposureDurationSeconds, in: bounds.minExposureSeconds...bounds.maxExposureSeconds)
+                    .onChange(of: captureManager.settings.manualExposureDurationSeconds) { _, _ in
+                        captureManager.applyManualCameraControls()
+                    }
+            case .exposureBias:
+                Slider(value: $captureManager.settings.exposureBias, in: bounds.minExposureBias...bounds.maxExposureBias)
+                    .onChange(of: captureManager.settings.exposureBias) { _, _ in
+                        captureManager.applyManualCameraControls()
+                    }
+            case .whiteBalance:
+                Slider(value: $captureManager.settings.whiteBalanceKelvin, in: 2500...7500, step: 100)
+                    .onChange(of: captureManager.settings.whiteBalanceKelvin) { _, _ in
+                        captureManager.applyManualCameraControls()
+                    }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 14)
+    }
+
+    private func adjustmentValueLabel(for adj: LiveCameraAdjustment) -> String {
+        switch adj {
+        case .iso:
+            return "\(Int(captureManager.settings.manualISO))"
+        case .shutter:
+            let inv = Int(round(1.0 / max(0.0001, captureManager.settings.manualExposureDurationSeconds)))
+            return "1/\(inv) s"
+        case .exposureBias:
+            return String(format: "%+.1f EV", captureManager.settings.exposureBias)
+        case .whiteBalance:
+            return "\(Int(captureManager.settings.whiteBalanceKelvin)) K"
         }
     }
 

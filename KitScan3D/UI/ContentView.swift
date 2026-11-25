@@ -437,7 +437,7 @@ struct ProjectDetailView: View {
                         }
                         .buttonStyle(.plain)
 
-                        // Merge, Align & Refine Card
+                        // Merge & Align Card
                         Button {
                             showMergeAlign = true
                         } label: {
@@ -445,8 +445,8 @@ struct ProjectDetailView: View {
                                 icon: "square.stack.3d.up",
                                 iconColor: .white,
                                 badgeColor: AppTheme.badge,
-                                title: "Merge, Align & Refine",
-                                subtitle: "Layer passes, auto-align (ICP) & refine poses"
+                                title: "Merge & Align",
+                                subtitle: "Automatically combine & sharpen passes"
                             )
                         }
                         .buttonStyle(.plain)
