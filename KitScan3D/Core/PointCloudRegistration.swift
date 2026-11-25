@@ -108,6 +108,7 @@ enum PointCloudRegistration {
         completion: @escaping (Int) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
+            autoreleasepool {
             let store = ScanProjectStore.shared
             let scanDir = store.scanDirectory(projectID: projectID, scanID: scanID)
             let jsonlURL = scanDir.appendingPathComponent("keyframes.jsonl")
@@ -192,6 +193,7 @@ enum PointCloudRegistration {
             DispatchQueue.main.async {
                 completion(refinedMap.count)
             }
+            } // autoreleasepool
         }
     }
 

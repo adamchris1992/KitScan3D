@@ -580,10 +580,11 @@ final class MetalPointCloudEngine: ObservableObject {
                 let refinedPoses = refinedData.flatMap { try? isoDecoder.decode(RefinedScanPoses.self, from: $0) }
 
                 for line in content.split(separator: "\n") {
+                    autoreleasepool {
                     guard let lineData = line.data(using: .utf8),
                           let kf = try? decoder.decode(KeyframeRecord.self, from: lineData),
                           kf.intrinsics.count == 9,
-                          kf.transform.count == 16 else { continue }
+                          kf.transform.count == 16 else { return }
 
                     let poseArr = refinedPoses?.poses[kf.index] ?? kf.transform
                     let transform = simd_float4x4(
@@ -601,7 +602,7 @@ final class MetalPointCloudEngine: ObservableObject {
                     guard let depthData = try? Data(contentsOf: depthURL),
                           let uiImage = UIImage(contentsOfFile: rgbURL.path),
                           let cgImage = uiImage.cgImage,
-                          let rgbBytes = Self.extractRGBA8Bytes(from: cgImage) else { continue }
+                          let rgbBytes = Self.extractRGBA8Bytes(from: cgImage) else { return }
 
                     let confData = try? Data(contentsOf: confURL)
                     let fx = kf.intrinsics[0]
@@ -713,6 +714,7 @@ final class MetalPointCloudEngine: ObservableObject {
                             }
                         }
                     }
+                    } // autoreleasepool
                 }
                 self.perScanPoints[scan.id] = Array(self.voxelMap.values)
                 self.perScanPoses[scan.id] = scanPoses

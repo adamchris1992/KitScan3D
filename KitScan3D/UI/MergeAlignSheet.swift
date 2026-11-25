@@ -105,16 +105,11 @@ struct MergeAlignSheet: View {
         statusMessage = nil
 
         let ordered = scans.sorted { $0.createdAt < $1.createdAt }
-        let group = DispatchGroup()
+        refineSequentially(scans: ordered, index: 0)
+    }
 
-        for scan in ordered where scan.frameCount >= 2 {
-            group.enter()
-            PointCloudRegistration.refineScanPoses(projectID: project.id, scanID: scan.id, settings: captureSettings) { _ in
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) {
+    private func refineSequentially(scans ordered: [ScanSessionMetadata], index: Int) {
+        if index >= ordered.count {
             engine.loadProjectFromDisk(projectID: project.id, settings: captureSettings) { poses in
                 guard ordered.count >= 2, let reference = ordered.first else {
                     onStateChanged(poses)
@@ -122,9 +117,18 @@ struct MergeAlignSheet: View {
                     statusMessage = "Scan refined!"
                     return
                 }
-
                 alignSequential(passes: Array(ordered.dropFirst()), onto: reference.id, index: 0)
             }
+            return
+        }
+
+        let scan = ordered[index]
+        guard scan.frameCount >= 2 else {
+            refineSequentially(scans: ordered, index: index + 1)
+            return
+        }
+        PointCloudRegistration.refineScanPoses(projectID: project.id, scanID: scan.id, settings: captureSettings) { _ in
+            refineSequentially(scans: ordered, index: index + 1)
         }
     }
 
