@@ -3,24 +3,11 @@ import SwiftUI
 struct CameraControlsSheet: View {
     @ObservedObject var captureManager: ARCaptureSessionManager
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPreset: ScanPreset = .roomFast
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Quick Presets") {
-                    Picker("Apply Preset", selection: $selectedPreset) {
-                        ForEach(ScanPreset.allCases) { preset in
-                            Text(preset.rawValue).tag(preset)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: selectedPreset) { _, preset in
-                        captureManager.settings.applyPreset(preset)
-                    }
-                }
-
-                Section("Resolution & Lens") {
+                Section("Resolution") {
                     Picker("Resolution", selection: Binding(
                         get: { captureManager.settings.resolution },
                         set: { captureManager.applyResolution($0) }
@@ -37,9 +24,6 @@ struct CameraControlsSheet: View {
                         Text("24 mm (Wide)")
                             .foregroundStyle(.secondary)
                     }
-                    Text("13 mm Ultra-Wide (Beta) is unavailable during LiDAR capture because ARKit `sceneDepth` only runs on the 24 mm Wide camera.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("Exposure & White Balance") {
@@ -171,6 +155,12 @@ struct CameraControlsSheet: View {
                         in: 250_000...4_000_000,
                         step: 250_000
                     )
+                }
+
+                Section {
+                    Button("Reset Scan Defaults", role: .destructive) {
+                        captureManager.settings.resetScanDefaults()
+                    }
                 }
             }
             .navigationTitle("Camera & Scan")

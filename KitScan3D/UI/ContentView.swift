@@ -420,35 +420,36 @@ struct ProjectDetailView: View {
                     }
                     .buttonStyle(.plain)
 
-                    // View Scans Card
-                    Button {
-                        showScansSheet = true
-                    } label: {
-                        ProjectActionRow(
-                            icon: "square.3.layers.3d",
-                            iconColor: .white,
-                            badgeColor: AppTheme.badge,
-                            title: "View Scans",
-                            subtitle: "\(scans.count) recorded pass(es) • inspect 3D point clouds"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    if !scans.isEmpty {
+                        // View Scans Card
+                        Button {
+                            showScansSheet = true
+                        } label: {
+                            ProjectActionRow(
+                                icon: "square.3.layers.3d",
+                                iconColor: .white,
+                                badgeColor: AppTheme.badge,
+                                title: "View Scans",
+                                subtitle: "\(scans.count) recorded pass(es) • inspect 3D point clouds"
+                            )
+                        }
+                        .buttonStyle(.plain)
 
-                    // Export PLY Card
-                    Button {
-                        exportPLY()
-                    } label: {
-                        ProjectActionRow(
-                            icon: "square.and.arrow.up",
-                            iconColor: .white,
-                            badgeColor: Color.blue.opacity(0.28),
-                            title: isExportingPLY ? "Exporting PLY..." : "Export PLY",
-                            subtitle: "Save or share binary .ply point cloud"
-                        )
+                        // Export PLY Card
+                        Button {
+                            exportPLY()
+                        } label: {
+                            ProjectActionRow(
+                                icon: "square.and.arrow.up",
+                                iconColor: .white,
+                                badgeColor: Color.blue.opacity(0.28),
+                                title: isExportingPLY ? "Exporting PLY..." : "Export PLY",
+                                subtitle: "Save or share binary .ply point cloud"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isExportingPLY)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(scans.isEmpty || isExportingPLY)
-                    .opacity(scans.isEmpty ? 0.5 : 1.0)
 
                     // Delete Project Card
                     Button {

@@ -57,7 +57,7 @@ final class KitScan3DTests: XCTestCase {
         settings.spacingMode = .adaptive
         settings.farClipMeters = 5.0
         let adaptive = VoxelHash.voxelSpacing(for: settings)
-        XCTAssertEqual(adaptive, 0.009, accuracy: 0.0001)
+        XCTAssertEqual(adaptive, 0.0045, accuracy: 0.0001)
 
         settings.spacingMode = .manual
         settings.manualSpacingMeters = 0.001

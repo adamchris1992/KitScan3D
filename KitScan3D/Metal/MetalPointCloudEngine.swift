@@ -31,10 +31,6 @@ struct LineVertex {
 
 struct ViewfinderUniforms {
     var displayTransform: simd_float4x4
-    var nearClip: Float
-    var farClip: Float
-    var showDepthPreview: UInt32
-    var showCoverageOverlay: UInt32
 }
 
 struct UnprojectUniforms {
@@ -97,10 +93,6 @@ final class MetalPointCloudEngine: ObservableObject {
     private let accumulatorQueue = DispatchQueue(label: "com.kitscan3d.voxelaccumulator", qos: .userInitiated)
     private var voxelMap: [Int64: PointVertex] = [:]
     private var voxelCounts: [Int64: UInt16] = [:]
-    private var coverageVoxels: Set<Int64> = []
-    private let coverageVoxelSpacing: Float = 0.04
-    private let covWidth = 128
-    private let covHeight = 96
     private var unprojectFrameCounter: UInt32 = 0
     private var lastRenderRebuildTime: CFAbsoluteTime = 0
 
@@ -110,12 +102,10 @@ final class MetalPointCloudEngine: ObservableObject {
     private let renderLock = NSLock()
     private var renderPointBuffer: MTLBuffer?
     private var renderPointCount: Int = 0
-    private var coverageTexture: MTLTexture?
 
     // Latest ARFrame textures for live viewfinder
     private var latestYTex: MTLTexture?
     private var latestCbCrTex: MTLTexture?
-    private var latestDepthTex: MTLTexture?
     private var latestDisplayTransform: simd_float4x4 = matrix_identity_float4x4
 
     init?() {
@@ -138,7 +128,6 @@ final class MetalPointCloudEngine: ObservableObject {
         )
 
         setupPipelines()
-        setupEmptyCoverageTexture()
     }
 
     private func setupPipelines() {
@@ -176,90 +165,11 @@ final class MetalPointCloudEngine: ObservableObject {
         }
     }
 
-    private func setupEmptyCoverageTexture() {
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: covWidth, height: covHeight, mipmapped: false)
-        desc.usage = [.shaderRead]
-        coverageTexture = device.makeTexture(descriptor: desc)
-        var zeros = [UInt8](repeating: 0, count: covWidth * covHeight)
-        coverageTexture?.replace(
-            region: MTLRegionMake2D(0, 0, covWidth, covHeight),
-            mipmapLevel: 0,
-            withBytes: &zeros,
-            bytesPerRow: covWidth
-        )
-    }
-
-    func updateCoverageMask(for frame: ARFrame, settings: CaptureSettings) {
-        guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth,
-              let covTex = coverageTexture else { return }
-
-        let depthMap = depthData.depthMap
-        let transform = frame.camera.transform
-        let intrinsics = frame.camera.intrinsics
-        let camRes = frame.camera.imageResolution
-
-        accumulatorQueue.async { [weak self] in
-            guard let self else { return }
-            if self.coverageVoxels.isEmpty { return }
-
-            CVPixelBufferLockBaseAddress(depthMap, .readOnly)
-            defer { CVPixelBufferUnlockBaseAddress(depthMap, .readOnly) }
-            guard let base = CVPixelBufferGetBaseAddress(depthMap) else { return }
-
-            let dW = CVPixelBufferGetWidth(depthMap)
-            let dH = CVPixelBufferGetHeight(depthMap)
-            let bpr = CVPixelBufferGetBytesPerRow(depthMap)
-            let fx = intrinsics.columns.0.x * Float(dW) / Float(camRes.width)
-            let fy = intrinsics.columns.1.y * Float(dH) / Float(camRes.height)
-            let cx = intrinsics.columns.2.x * Float(dW) / Float(camRes.width)
-            let cy = intrinsics.columns.2.y * Float(dH) / Float(camRes.height)
-
-            var mask = [UInt8](repeating: 0, count: self.covWidth * self.covHeight)
-
-            for cyIdx in 0..<self.covHeight {
-                let dy = min(dH - 1, (cyIdx * dH) / self.covHeight)
-                let rowPtr = base.advanced(by: dy * bpr).assumingMemoryBound(to: Float32.self)
-                for cxIdx in 0..<self.covWidth {
-                    let dx = min(dW - 1, (cxIdx * dW) / self.covWidth)
-                    let d = rowPtr[dx]
-                    if d.isNaN || d <= 0 || d < settings.nearClipMeters || d > settings.farClipMeters {
-                        continue
-                    }
-                    let xCam = (Float(dx) + 0.5 - cx) * d / fx
-                    let yCam = -(Float(dy) + 0.5 - cy) * d / fy
-                    let zCam = -d
-                    let world = transform * SIMD4<Float>(xCam, yCam, zCam, 1.0)
-                    let pos = SIMD3<Float>(world.x, world.y, world.z)
-
-                    let covKey = VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing)
-                    if self.coverageVoxels.contains(covKey) {
-                        mask[cyIdx * self.covWidth + cxIdx] = 255
-                    }
-                }
-            }
-
-            covTex.replace(
-                region: MTLRegionMake2D(0, 0, self.covWidth, self.covHeight),
-                mipmapLevel: 0,
-                withBytes: &mask,
-                bytesPerRow: self.covWidth
-            )
-        }
-    }
-
     func resetPointCloud() {
         accumulatorQueue.async { [weak self] in
             guard let self else { return }
             self.voxelMap.removeAll(keepingCapacity: false)
             self.voxelCounts.removeAll(keepingCapacity: false)
-            self.coverageVoxels.removeAll(keepingCapacity: false)
-            var zeros = [UInt8](repeating: 0, count: self.covWidth * self.covHeight)
-            self.coverageTexture?.replace(
-                region: MTLRegionMake2D(0, 0, self.covWidth, self.covHeight),
-                mipmapLevel: 0,
-                withBytes: &zeros,
-                bytesPerRow: self.covWidth
-            )
             self.renderLock.lock()
             self.renderPointBuffer = nil
             self.renderPointCount = 0
@@ -276,9 +186,6 @@ final class MetalPointCloudEngine: ObservableObject {
 
         let yTex = makeTexture(from: frame.capturedImage, pixelFormat: .r8Unorm, planeIndex: 0, cache: cache)
         let cbcrTex = makeTexture(from: frame.capturedImage, pixelFormat: .rg8Unorm, planeIndex: 1, cache: cache)
-        let depthTex: MTLTexture? = frame.sceneDepth.flatMap {
-            makeTexture(from: $0.depthMap, pixelFormat: .r32Float, planeIndex: 0, cache: cache)
-        }
 
         let affine = frame.displayTransform(for: .portrait, viewportSize: viewportSize).inverted()
         let mat = simd_float4x4(
@@ -291,7 +198,6 @@ final class MetalPointCloudEngine: ObservableObject {
         renderLock.lock()
         self.latestYTex = yTex
         self.latestCbCrTex = cbcrTex
-        self.latestDepthTex = depthTex
         self.latestDisplayTransform = mat
         renderLock.unlock()
     }
@@ -380,9 +286,7 @@ final class MetalPointCloudEngine: ObservableObject {
                 let budget = settings.maxPointBudget
                 let spacing = VoxelHash.voxelSpacing(for: settings)
                 for pt in batch {
-                    let pos = pt.simdPosition
                     self.accumulatePoint(pt, spacing: spacing, budget: budget)
-                    self.coverageVoxels.insert(VoxelHash.key(for: pos, spacing: self.coverageVoxelSpacing))
                 }
 
                 let now = CFAbsoluteTimeGetCurrent()
@@ -438,10 +342,10 @@ final class MetalPointCloudEngine: ObservableObject {
         }
     }
 
-    func snapshotViewfinderTextures() -> (y: MTLTexture?, cbcr: MTLTexture?, depth: MTLTexture?, cov: MTLTexture?, transform: simd_float4x4) {
+    func snapshotViewfinderTextures() -> (y: MTLTexture?, cbcr: MTLTexture?, transform: simd_float4x4) {
         renderLock.lock()
         defer { renderLock.unlock() }
-        return (latestYTex, latestCbCrTex, latestDepthTex, coverageTexture, latestDisplayTransform)
+        return (latestYTex, latestCbCrTex, latestDisplayTransform)
     }
 
     func snapshot3DPointBuffer() -> (buffer: MTLBuffer?, count: Int) {

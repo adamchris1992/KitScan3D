@@ -4,7 +4,6 @@ import simd
 
 struct LiveCameraMetalView: UIViewRepresentable {
     @ObservedObject var engine: MetalPointCloudEngine
-    let settings: CaptureSettings
 
     func makeCoordinator() -> Coordinator {
         Coordinator(engine: engine)
@@ -20,13 +19,10 @@ struct LiveCameraMetalView: UIViewRepresentable {
         return mtk
     }
 
-    func updateUIView(_ uiView: MTKView, context: Context) {
-        context.coordinator.settings = settings
-    }
+    func updateUIView(_ uiView: MTKView, context: Context) {}
 
     final class Coordinator: NSObject, MTKViewDelegate {
         let engine: MetalPointCloudEngine
-        var settings = CaptureSettings()
 
         init(engine: MetalPointCloudEngine) {
             self.engine = engine
@@ -51,21 +47,12 @@ struct LiveCameraMetalView: UIViewRepresentable {
                 return
             }
 
-            var uniforms = ViewfinderUniforms(
-                displayTransform: snap.transform,
-                nearClip: settings.nearClipMeters,
-                farClip: settings.farClipMeters,
-                showDepthPreview: settings.showLiveDepthPreview ? 1 : 0,
-                showCoverageOverlay: settings.showCoverageOverlay ? 1 : 0
-            )
+            var uniforms = ViewfinderUniforms(displayTransform: snap.transform)
 
             encoder.setRenderPipelineState(pipeline)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<ViewfinderUniforms>.stride, index: 0)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<ViewfinderUniforms>.stride, index: 0)
             encoder.setFragmentTexture(y, index: 0)
             encoder.setFragmentTexture(cbcr, index: 1)
-            encoder.setFragmentTexture(snap.depth ?? y, index: 2)
-            encoder.setFragmentTexture(snap.cov ?? y, index: 3)
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             encoder.endEncoding()
 

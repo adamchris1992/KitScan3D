@@ -17,39 +17,14 @@ struct CaptureView: View {
 
     @State private var showSettingsSheet = false
     @State private var mapMode: MapOverlayMode = .map2D
-    @State private var isFullScreen3D = false
     @State private var showScanComplete = false
     @State private var toastMessage: String?
-    @State private var frameTick = 0
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if isFullScreen3D {
-                    PointCloud3DMetalView(
-                        engine: engine,
-                        trajectoryPoses: captureManager.trajectoryPoses,
-                        currentPose: captureManager.currentCameraPose,
-                        showLiveFrustum: false
-                    )
+                LiveCameraMetalView(engine: engine)
                     .ignoresSafeArea()
-                    if engine.totalPointCount == 0 {
-                        VStack(spacing: 8) {
-                            Image(systemName: "cube.transparent")
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
-                            Text("No 3D points captured yet.\nTap the shutter to start scanning.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                } else {
-                    LiveCameraMetalView(engine: engine, settings: captureManager.settings)
-                        .ignoresSafeArea()
-                }
 
                 VStack(spacing: 8) {
                     topHUD
@@ -65,7 +40,7 @@ struct CaptureView: View {
                     }
                     Spacer()
 
-                    if !isFullScreen3D && mapMode != .hidden {
+                    if mapMode != .hidden {
                         HStack {
                             Spacer()
                             miniMapCard
@@ -82,7 +57,7 @@ struct CaptureView: View {
                 captureManager.onFrameUpdate = { frame in
                     engine.updateLiveFrame(frame, viewportSize: geo.size)
                 }
-                captureManager.onKeyframeCaptured = { frame, _ in
+                captureManager.onKeyframeCaptured = { frame in
                     engine.processCapturedKeyframe(frame, settings: captureManager.settings)
                 }
                 captureManager.startSession()
@@ -277,11 +252,6 @@ struct CaptureView: View {
                     .buttonStyle(.plain)
 
                     Button { showSettingsSheet = true } label: {
-                        QuickBarChip(icon: "camera", title: "24mm", isActive: false)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { showSettingsSheet = true } label: {
                         QuickBarChip(icon: "thermometer.medium", title: "\(Int(captureManager.settings.whiteBalanceKelvin))K", isActive: false)
                     }
                     .buttonStyle(.plain)
@@ -337,11 +307,10 @@ struct CaptureView: View {
                     if captureManager.isRecording {
                         captureManager.pauseRecording()
                     } else {
-                        isFullScreen3D = false
                         if captureManager.currentScan == nil {
                             engine.resetPointCloud()
                         }
-                        captureManager.startRecording(in: project)
+                        captureManager.startRecording(in: project.id)
                     }
                 } label: {
                     ZStack {

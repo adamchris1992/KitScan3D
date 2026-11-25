@@ -13,21 +13,6 @@ enum ResolutionPreset: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum LensOption: String, CaseIterable, Codable, Identifiable {
-    case wide24mm = "24 mm (Wide)"
-    case ultraWide13mmBeta = "13 mm (Ultra-Wide Beta)"
-
-    var id: String { rawValue }
-
-    /// ARKit ARWorldTrackingConfiguration with LiDAR sceneDepth only runs on the primary 24mm Wide lens.
-    var isSupportedWithLiDARARKit: Bool {
-        switch self {
-        case .wide24mm: return true
-        case .ultraWide13mmBeta: return false
-        }
-    }
-}
-
 enum CaptureMode: String, CaseIterable, Codable, Identifiable {
     case scanAndGo = "Scan & Go"
     case manualSingleShot = "Manual Shot"
@@ -42,18 +27,9 @@ enum PointSpacingMode: String, CaseIterable, Codable, Identifiable {
     var id: String { rawValue }
 }
 
-enum ScanPreset: String, CaseIterable, Identifiable {
-    case roomFast = "Room (Fast)"
-    case objectDetail = "Object (High Detail)"
-    case outdoorLarge = "Large Area"
-
-    var id: String { rawValue }
-}
-
 struct CaptureSettings: Codable, Equatable {
-    // Resolution & Lens
+    // Resolution
     var resolution: ResolutionPreset = .fullHD1080p
-    var lens: LensOption = .wide24mm
 
     // Exposure & White Balance
     var isAutoMagicLocked: Bool = true
@@ -79,33 +55,18 @@ struct CaptureSettings: Codable, Equatable {
     var manualSpacingMeters: Float = 0.005 // 1 mm (0.001) to 5 cm (0.05)
     var maxPointBudget: Int = 3_000_000
 
-    // Viewfinder Overlays
-    var showLiveDepthPreview: Bool = false
-    var showCoverageOverlay: Bool = false
-
-    mutating func applyPreset(_ preset: ScanPreset) {
-        switch preset {
-        case .roomFast:
-            spacingMode = .manual
-            manualSpacingMeters = 0.02
-            farClipMeters = 5.0
-            scanAndGoIntervalSeconds = 0.4
-            scanAndGoMinTranslationMeters = 0.15
-            scanAndGoMinRotationDegrees = 10.0
-        case .objectDetail:
-            spacingMode = .manual
-            manualSpacingMeters = 0.003
-            farClipMeters = 2.5
-            scanAndGoIntervalSeconds = 0.25
-            scanAndGoMinTranslationMeters = 0.06
-            scanAndGoMinRotationDegrees = 5.0
-        case .outdoorLarge:
-            spacingMode = .adaptive
-            manualSpacingMeters = 0.035
-            farClipMeters = 12.0
-            scanAndGoIntervalSeconds = 0.5
-            scanAndGoMinTranslationMeters = 0.25
-            scanAndGoMinRotationDegrees = 12.0
-        }
+    /// Restores scan-quality defaults while keeping the chosen resolution and current exposure lock state.
+    mutating func resetScanDefaults() {
+        let defaults = CaptureSettings()
+        captureMode = defaults.captureMode
+        scanAndGoIntervalSeconds = defaults.scanAndGoIntervalSeconds
+        scanAndGoMinTranslationMeters = defaults.scanAndGoMinTranslationMeters
+        scanAndGoMinRotationDegrees = defaults.scanAndGoMinRotationDegrees
+        nearClipMeters = defaults.nearClipMeters
+        farClipMeters = defaults.farClipMeters
+        minDepthConfidence = defaults.minDepthConfidence
+        spacingMode = defaults.spacingMode
+        manualSpacingMeters = defaults.manualSpacingMeters
+        maxPointBudget = defaults.maxPointBudget
     }
 }
