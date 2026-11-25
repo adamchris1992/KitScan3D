@@ -55,6 +55,7 @@ struct ProjectsHomeView: View {
 
     @State private var showNewProjectSheet = false
     @State private var showDiagnostics = false
+    @State private var showHelpCenter = false
     @State private var isEditing = false
     @State private var projectToRename: ScanProjectMetadata?
     @State private var renameText = ""
@@ -65,123 +66,131 @@ struct ProjectsHomeView: View {
             ZStack {
                 AppTheme.background.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        Text("Projects")
-                            .font(.largeTitle.bold())
-                            .padding(.horizontal)
-                            .padding(.top, 8)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Projects")
+                        .font(.largeTitle.bold())
+                        .padding(.horizontal)
+                        .padding(.top, 8)
 
-                        if projectStore.projects.isEmpty {
-                            VStack(spacing: 12) {
-                                Image(systemName: "folder")
-                                    .font(.system(size: 44))
-                                    .foregroundStyle(.secondary)
-                                Text("No Projects")
-                                    .font(.title3.bold())
-                                Text("Tap + to create a scan project.")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 80)
-                        } else {
-                            LazyVStack(spacing: 12) {
-                                ForEach(projectStore.projects) { project in
-                                    HStack(spacing: 12) {
-                                        if isEditing {
-                                            Button {
-                                                projectToDelete = project
-                                            } label: {
-                                                Image(systemName: "minus.circle.fill")
-                                                    .font(.title3)
-                                                    .foregroundStyle(.red)
-                                            }
-                                        }
-
-                                        NavigationLink {
-                                            ProjectDetailView(
-                                                project: project,
-                                                captureManager: captureManager,
-                                                engine: engine
-                                            )
+                    if projectStore.projects.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 44))
+                                .foregroundStyle(.secondary)
+                            Text("No Projects")
+                                .font(.title3.bold())
+                            Text("Tap + to create a scan project.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        List {
+                            ForEach(projectStore.projects) { project in
+                                HStack(spacing: 12) {
+                                    if isEditing {
+                                        Button {
+                                            projectToDelete = project
                                         } label: {
-                                            HStack(spacing: 14) {
-                                                ZStack {
-                                                    RoundedRectangle(cornerRadius: 12)
-                                                        .fill(AppTheme.badge)
-                                                        .frame(width: 48, height: 48)
-                                                    Image(systemName: "cube.transparent")
-                                                        .font(.title3)
-                                                        .foregroundStyle(.white.opacity(0.85))
-                                                }
-
-                                                VStack(alignment: .leading, spacing: 4) {
-                                                    Text(project.name)
-                                                        .font(.headline)
-                                                        .foregroundStyle(.white)
-                                                    Text("\(project.scanIDs.count) pass(es) • \(project.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                }
-
-                                                Spacer()
-
-                                                if isEditing {
-                                                    Button {
-                                                        renameText = project.name
-                                                        projectToRename = project
-                                                    } label: {
-                                                        Image(systemName: "pencil")
-                                                            .font(.subheadline)
-                                                            .padding(8)
-                                                            .background(AppTheme.badge, in: Circle())
-                                                    }
-                                                } else {
-                                                    Image(systemName: "chevron.right")
-                                                        .font(.caption.bold())
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                            }
-                                            .padding(14)
-                                            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
-                                            .overlay(
-                                                RoundedRectangle(cornerRadius: 16)
-                                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
-                                            )
+                                            Image(systemName: "minus.circle.fill")
+                                                .font(.title3)
+                                                .foregroundStyle(.red)
                                         }
                                         .buttonStyle(.plain)
-                                        .contextMenu {
-                                            Button {
-                                                renameText = project.name
-                                                projectToRename = project
-                                            } label: {
-                                                Label("Rename", systemImage: "pencil")
+                                    }
+
+                                    NavigationLink {
+                                        ProjectDetailView(
+                                            project: project,
+                                            captureManager: captureManager,
+                                            engine: engine
+                                        )
+                                    } label: {
+                                        HStack(spacing: 14) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .fill(AppTheme.badge)
+                                                    .frame(width: 48, height: 48)
+                                                Image(systemName: "cube.transparent")
+                                                    .font(.title3)
+                                                    .foregroundStyle(.white.opacity(0.85))
                                             }
-                                            Button(role: .destructive) {
-                                                projectToDelete = project
-                                            } label: {
-                                                Label("Delete", systemImage: "trash")
+
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(project.name)
+                                                    .font(.headline)
+                                                    .foregroundStyle(.white)
+                                                Text("\(project.scanIDs.count) pass(es) • \(project.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+
+                                            Spacer()
+
+                                            if isEditing {
+                                                Button {
+                                                    renameText = project.name
+                                                    projectToRename = project
+                                                } label: {
+                                                    Image(systemName: "pencil")
+                                                        .font(.subheadline)
+                                                        .padding(8)
+                                                        .background(AppTheme.badge, in: Circle())
+                                                }
+                                                .buttonStyle(.plain)
                                             }
                                         }
+                                        .padding(14)
+                                        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 16)
+                                                .stroke(AppTheme.cardBorder, lineWidth: 1)
+                                        )
                                     }
-                                    .padding(.horizontal)
+                                }
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        projectToDelete = project
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    Button {
+                                        renameText = project.name
+                                        projectToRename = project
+                                    } label: {
+                                        Label("Rename", systemImage: "pencil")
+                                    }
+                                    .tint(.blue)
                                 }
                             }
                         }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
                     }
-                    .padding(.bottom, 24)
                 }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showDiagnostics = true
-                    } label: {
-                        Image(systemName: "terminal")
-                            .font(.subheadline)
-                            .padding(8)
-                            .background(AppTheme.card, in: Circle())
+                    HStack(spacing: 8) {
+                        Button {
+                            showDiagnostics = true
+                        } label: {
+                            Image(systemName: "terminal")
+                                .font(.subheadline)
+                                .padding(8)
+                                .background(AppTheme.card, in: Circle())
+                        }
+                        Button {
+                            showHelpCenter = true
+                        } label: {
+                            Image(systemName: "questionmark")
+                                .font(.subheadline)
+                                .padding(8)
+                                .background(AppTheme.card, in: Circle())
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -193,6 +202,7 @@ struct ProjectsHomeView: View {
                         .foregroundStyle(.white)
 
                         Button {
+                            isEditing = false
                             showNewProjectSheet = true
                         } label: {
                             Image(systemName: "plus")
@@ -207,11 +217,15 @@ struct ProjectsHomeView: View {
             }
             .sheet(isPresented: $showNewProjectSheet) {
                 NewProjectSheetView { name in
+                    isEditing = false
                     projectStore.createProject(name: name)
                 }
             }
             .sheet(isPresented: $showDiagnostics) {
                 DiagnosticsConsoleView()
+            }
+            .sheet(isPresented: $showHelpCenter) {
+                HelpCenterView()
             }
             .alert("Rename Project", isPresented: Binding(
                 get: { projectToRename != nil },
@@ -353,8 +367,9 @@ struct ProjectDetailView: View {
     @State private var renameText = ""
     @State private var showDeleteConfirm = false
     @State private var displayTitle: String = ""
-    @State private var isExportingPLY = false
-    @State private var exportedPLYURL: URL?
+    @State private var isExporting = false
+    @State private var showExportSheet = false
+    @State private var exportedFileURL: URL?
     @State private var showMergeAlign = false
     @State private var alignmentState = ProjectAlignmentState()
 
@@ -451,20 +466,20 @@ struct ProjectDetailView: View {
                         }
                         .buttonStyle(.plain)
 
-                        // Export PLY Card
+                        // Export Card
                         Button {
-                            exportPLY()
+                            showExportSheet = true
                         } label: {
                             ProjectActionRow(
                                 icon: "square.and.arrow.up",
                                 iconColor: .white,
                                 badgeColor: Color.blue.opacity(0.28),
-                                title: isExportingPLY ? "Exporting PLY..." : "Export PLY",
-                                subtitle: "Save or share binary .ply point cloud"
+                                title: isExporting ? "Exporting..." : "Export",
+                                subtitle: "PLY, COLMAP (3DGS), ZIP Bundle, or Beta Splat"
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(isExportingPLY)
+                        .disabled(isExporting)
                     }
 
                     // Delete Project Card
@@ -587,38 +602,69 @@ struct ProjectDetailView: View {
                 }
             )
         }
+        .sheet(isPresented: $showExportSheet) {
+            ExportOptionsSheet(
+                projectName: displayTitle.isEmpty ? project.name : displayTitle,
+                isExporting: isExporting,
+                onExportPLY: { runExport(.ply) },
+                onExportCOLMAP: { density in runExport(.colmap(density)) },
+                onExportBundle: { runExport(.bundle) },
+                onExport3DGS: { runExport(.gaussianSplat) }
+            )
+        }
         .sheet(isPresented: Binding(
-            get: { exportedPLYURL != nil },
-            set: { if !$0 { exportedPLYURL = nil } }
+            get: { exportedFileURL != nil },
+            set: { if !$0 { exportedFileURL = nil } }
         )) {
-            if let url = exportedPLYURL {
+            if let url = exportedFileURL {
                 ShareSheet(items: [url])
             }
         }
     }
 
-    private func exportPLY() {
-        isExportingPLY = true
+    private enum ExportKind {
+        case ply
+        case colmap(COLMAPDensity)
+        case bundle
+        case gaussianSplat
+    }
+
+    private func runExport(_ kind: ExportKind) {
+        showExportSheet = false
+        isExporting = true
         let safeName = (displayTitle.isEmpty ? project.name : displayTitle)
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
-        let outURL = ScanProjectStore.shared
+        let exportsDir = ScanProjectStore.shared
             .projectDirectory(for: project.id)
-            .appendingPathComponent("exports/\(safeName).ply")
+            .appendingPathComponent("exports", isDirectory: true)
 
         engine.loadProjectFromDisk(projectID: project.id, settings: captureManager.settings) { _ in
             engine.exportCurrentPointsSnapshot { points in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        try PLYExporter.exportBinaryPLY(points: points, to: outURL)
+                        let outURL: URL
+                        switch kind {
+                        case .ply:
+                            outURL = exportsDir.appendingPathComponent("\(safeName).ply")
+                            try PLYExporter.exportBinaryPLY(points: points, to: outURL)
+                        case .colmap(let density):
+                            outURL = try COLMAPExporter.exportCOLMAPZip(project: project, points: points, density: density)
+                        case .bundle:
+                            outURL = try ProjectZipExporter.exportPortableBundle(project: project, points: points)
+                        case .gaussianSplat:
+                            outURL = exportsDir.appendingPathComponent("\(safeName)_3DGS_Beta.ply")
+                            let spacing = VoxelHash.voxelSpacing(for: captureManager.settings)
+                            try GaussianSplatExporter.exportGaussianSplatPLY(points: points, voxelSpacing: spacing, to: outURL)
+                        }
                         DispatchQueue.main.async {
-                            isExportingPLY = false
-                            exportedPLYURL = outURL
+                            isExporting = false
+                            exportedFileURL = outURL
                         }
                     } catch {
-                        DiagnosticsLogger.shared.log(.error, category: "Export", "PLY export failed: \(error.localizedDescription)")
+                        DiagnosticsLogger.shared.log(.error, category: "Export", "Export failed: \(error.localizedDescription)")
                         DispatchQueue.main.async {
-                            isExportingPLY = false
+                            isExporting = false
                         }
                     }
                 }
@@ -1090,4 +1136,79 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+struct ExportOptionsSheet: View {
+    let projectName: String
+    let isExporting: Bool
+    let onExportPLY: () -> Void
+    let onExportCOLMAP: (COLMAPDensity) -> Void
+    let onExportBundle: () -> Void
+    let onExport3DGS: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var colmapDensity: COLMAPDensity = .downsampled
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Point Cloud") {
+                    Button {
+                        onExportPLY()
+                    } label: {
+                        Label("Export Point Cloud (.ply)", systemImage: "cube")
+                    }
+                    .disabled(isExporting)
+                }
+
+                Section("COLMAP Dataset (for 3DGS Trainers)") {
+                    Picker("Point Density", selection: $colmapDensity) {
+                        ForEach(COLMAPDensity.allCases) { d in
+                            Text(d.rawValue).tag(d)
+                        }
+                    }
+
+                    Button {
+                        onExportCOLMAP(colmapDensity)
+                    } label: {
+                        Label("Export COLMAP Dataset (.zip)", systemImage: "camera.metering.matrix")
+                    }
+                    .disabled(isExporting)
+
+                    Text("Includes undistorted RGB images/, sparse/0/cameras.txt, images.txt, points3D.txt, and points3D.ply in COLMAP coordinates.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Full Project Archive") {
+                    Button {
+                        onExportBundle()
+                    } label: {
+                        Label("Export Portable Bundle (.zip)", systemImage: "archivebox")
+                    }
+                    .disabled(isExporting)
+
+                    Text("Includes manifest.json, RGB frames, 16-bit depth PNGs (mm), poses (JSON/CSV), and merged_pointcloud.ply.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Experimental") {
+                    Button {
+                        onExport3DGS()
+                    } label: {
+                        Label("Export 3DGS Splat (.ply Beta)", systemImage: "sparkles")
+                    }
+                    .disabled(isExporting)
+                }
+            }
+            .navigationTitle("Export \(projectName)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
 }

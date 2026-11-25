@@ -90,4 +90,15 @@ final class KitScan3DTests: XCTestCase {
         XCTAssertEqual(res.transform.columns.3.y, offset.y, accuracy: 0.02)
         XCTAssertEqual(res.transform.columns.3.z, offset.z, accuracy: 0.02)
     }
+
+    func testARKitToCOLMAPExtrinsics() {
+        // ARKit camera at (0, 0, 2) looking down -Z (world origin is 2m in front of camera)
+        var c2w = matrix_identity_float4x4
+        c2w.columns.3 = SIMD4<Float>(0, 0, 2, 1)
+        let ext = COLMAPExporter.arkitToCOLMAPExtrinsics(c2w)
+        // In COLMAP (+Z forward), world origin (0, 0, 0) is at +2 on camera Z
+        XCTAssertEqual(ext.tx, 0, accuracy: 0.001)
+        XCTAssertEqual(ext.ty, 0, accuracy: 0.001)
+        XCTAssertEqual(ext.tz, 2, accuracy: 0.001)
+    }
 }
