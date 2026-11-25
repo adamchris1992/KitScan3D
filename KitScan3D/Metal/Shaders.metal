@@ -279,9 +279,9 @@ vertex PointVertexOut pointCloudVertex(uint vid [[vertex_id]],
     PointVertexOut out;
     out.position = u.viewProjection * float4(float3(v.position), 1.0);
     out.color = float3(v.color);
-    // Smaller, distance-attenuated point size to avoid overlapping into diagonal stripes
+    // Crisp, distance-attenuated point size without darkening or diagonal stripe overlap
     float dist = max(0.35, out.position.w);
-    out.pointSize = clamp(u.pointSize * 1.6 / dist, 1.0, 5.5);
+    out.pointSize = clamp(u.pointSize * 2.2 / dist, 2.2, 8.5);
     return out;
 }
 
@@ -292,9 +292,7 @@ fragment float4 pointCloudFragment(PointVertexOut in [[stage_in]],
     if (r2 > 0.25) {
         discard_fragment();
     }
-    // Subtle soft splat shading toward the rim for smoother surface appearance
-    float rim = 1.0 - smoothstep(0.12, 0.25, r2) * 0.18;
-    return float4(in.color * rim, 1.0);
+    return float4(in.color, 1.0);
 }
 
 struct LineVertexOut {

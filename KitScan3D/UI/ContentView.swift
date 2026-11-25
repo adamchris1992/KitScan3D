@@ -1,6 +1,13 @@
 import SwiftUI
 import simd
 
+private enum AppTheme {
+    static let background = Color(red: 0.043, green: 0.047, blue: 0.063)
+    static let card = Color(red: 0.082, green: 0.090, blue: 0.118)
+    static let cardBorder = Color.white.opacity(0.08)
+    static let badge = Color.white.opacity(0.08)
+}
+
 struct ContentView: View {
     @StateObject private var captureManager = ARCaptureSessionManager()
     @StateObject private var projectStore = ScanProjectStore.shared
@@ -37,7 +44,7 @@ struct UnsupportedHardwareView: View {
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(AppTheme.background)
     }
 }
 
@@ -46,88 +53,165 @@ struct ProjectsHomeView: View {
     @ObservedObject var projectStore: ScanProjectStore
     @ObservedObject var engine: MetalPointCloudEngine
 
-    @State private var newProjectName = ""
-    @State private var showNewProjectAlert = false
+    @State private var showNewProjectSheet = false
     @State private var showDiagnostics = false
-    @State private var activeCaptureProject: ScanProjectMetadata?
+    @State private var isEditing = false
     @State private var projectToRename: ScanProjectMetadata?
     @State private var renameText = ""
     @State private var projectToDelete: ScanProjectMetadata?
 
     var body: some View {
         NavigationStack {
-            List {
-                if projectStore.projects.isEmpty {
-                    ContentUnavailableView(
-                        "No Scan Projects Yet",
-                        systemImage: "cube.transparent",
-                        description: Text("Tap + to create a project before starting your first 3D scan.")
-                    )
-                } else {
-                    ForEach(projectStore.projects) { project in
-                        NavigationLink {
-                            ProjectDetailView(
-                                project: project,
-                                captureManager: captureManager,
-                                engine: engine
-                            )
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(project.name)
-                                    .font(.headline)
-                                Text("\(project.scanIDs.count) pass(es) • \(project.updatedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption)
+            ZStack {
+                AppTheme.background.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Projects")
+                            .font(.largeTitle.bold())
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+
+                        if projectStore.projects.isEmpty {
+                            VStack(spacing: 12) {
+                                Image(systemName: "folder")
+                                    .font(.system(size: 44))
+                                    .foregroundStyle(.secondary)
+                                Text("No Projects")
+                                    .font(.title3.bold())
+                                Text("Tap + to create a scan project.")
+                                    .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
-                            .padding(.vertical, 4)
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) {
-                                projectToDelete = project
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 80)
+                        } else {
+                            LazyVStack(spacing: 12) {
+                                ForEach(projectStore.projects) { project in
+                                    HStack(spacing: 12) {
+                                        if isEditing {
+                                            Button {
+                                                projectToDelete = project
+                                            } label: {
+                                                Image(systemName: "minus.circle.fill")
+                                                    .font(.title3)
+                                                    .foregroundStyle(.red)
+                                            }
+                                        }
+
+                                        NavigationLink {
+                                            ProjectDetailView(
+                                                project: project,
+                                                captureManager: captureManager,
+                                                engine: engine
+                                            )
+                                        } label: {
+                                            HStack(spacing: 14) {
+                                                ZStack {
+                                                    RoundedRectangle(cornerRadius: 12)
+                                                        .fill(AppTheme.badge)
+                                                        .frame(width: 48, height: 48)
+                                                    Image(systemName: "cube.transparent")
+                                                        .font(.title3)
+                                                        .foregroundStyle(.white.opacity(0.85))
+                                                }
+
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(project.name)
+                                                        .font(.headline)
+                                                        .foregroundStyle(.white)
+                                                    Text("\(project.scanIDs.count) pass(es) • \(project.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+
+                                                Spacer()
+
+                                                if isEditing {
+                                                    Button {
+                                                        renameText = project.name
+                                                        projectToRename = project
+                                                    } label: {
+                                                        Image(systemName: "pencil")
+                                                            .font(.subheadline)
+                                                            .padding(8)
+                                                            .background(AppTheme.badge, in: Circle())
+                                                    }
+                                                } else {
+                                                    Image(systemName: "chevron.right")
+                                                        .font(.caption.bold())
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            .padding(14)
+                                            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 16)
+                                                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .contextMenu {
+                                            Button {
+                                                renameText = project.name
+                                                projectToRename = project
+                                            } label: {
+                                                Label("Rename", systemImage: "pencil")
+                                            }
+                                            Button(role: .destructive) {
+                                                projectToDelete = project
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
                             }
-                            Button {
-                                renameText = project.name
-                                projectToRename = project
-                            } label: {
-                                Label("Rename", systemImage: "pencil")
-                            }
-                            .tint(.blue)
                         }
                     }
+                    .padding(.bottom, 24)
                 }
             }
-            .navigationTitle("KitScan3D")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         showDiagnostics = true
                     } label: {
-                        Label("Diagnostics", systemImage: "terminal")
+                        Image(systemName: "terminal")
+                            .font(.subheadline)
+                            .padding(8)
+                            .background(AppTheme.card, in: Circle())
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showNewProjectAlert = true
-                    } label: {
-                        Label("New Project", systemImage: "plus")
+                    HStack(spacing: 10) {
+                        Button(isEditing ? "Done" : "Edit") {
+                            withAnimation { isEditing.toggle() }
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.white)
+
+                        Button {
+                            showNewProjectSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.white)
+                        }
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(AppTheme.card, in: Capsule())
                 }
             }
-            .alert("New Scan Project", isPresented: $showNewProjectAlert) {
-                TextField("Project Name", text: $newProjectName)
-                Button("Create & Scan") {
-                    let df = DateFormatter()
-                    df.dateFormat = "yyyy-MM-dd HH:mm"
-                    let name = newProjectName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let created = projectStore.createProject(name: name.isEmpty ? "Scan \(df.string(from: Date()))" : name)
-                    newProjectName = ""
-                    activeCaptureProject = created
+            .sheet(isPresented: $showNewProjectSheet) {
+                NewProjectSheetView { name in
+                    projectStore.createProject(name: name)
                 }
-                Button("Cancel", role: .cancel) {
-                    newProjectName = ""
-                }
+            }
+            .sheet(isPresented: $showDiagnostics) {
+                DiagnosticsConsoleView()
             }
             .alert("Rename Project", isPresented: Binding(
                 get: { projectToRename != nil },
@@ -164,19 +248,90 @@ struct ProjectsHomeView: View {
             } message: {
                 Text("This removes all recorded frames and depth data for '\(projectToDelete?.name ?? "")'.")
             }
-            .sheet(isPresented: $showDiagnostics) {
-                DiagnosticsConsoleView()
-            }
-            .fullScreenCover(item: $activeCaptureProject) { project in
-                CaptureView(
-                    project: project,
-                    captureManager: captureManager,
-                    engine: engine
-                )
-            }
             .onAppear {
                 projectStore.reloadProjects()
             }
+        }
+    }
+}
+
+struct NewProjectSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var nameText = ""
+    let onCreate: (String) -> Void
+
+    var body: some View {
+        ZStack {
+            AppTheme.background.ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(AppTheme.card, in: Capsule())
+
+                    Spacer()
+                    Text("New Project")
+                        .font(.headline)
+                    Spacer()
+                    Color.clear.frame(width: 70, height: 1)
+                }
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(AppTheme.card)
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "folder.badge.plus")
+                        .font(.title2)
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 8)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Start a New Scan")
+                        .font(.title.bold())
+                    Text("Organize your LiDAR passes and 3D point clouds together in one project.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("PROJECT NAME")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+
+                    TextField("e.g. Living Room, Staircase ...", text: $nameText)
+                        .padding(14)
+                        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(AppTheme.cardBorder, lineWidth: 1)
+                        )
+                }
+
+                Button {
+                    let df = DateFormatter()
+                    df.dateFormat = "yyyy-MM-dd HH:mm"
+                    let trimmed = nameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onCreate(trimmed.isEmpty ? "Scan \(df.string(from: Date()))" : trimmed)
+                    dismiss()
+                } label: {
+                    Label("Create Project", systemImage: "plus")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 8)
+
+                Spacer()
+            }
+            .padding()
         }
     }
 }
@@ -188,7 +343,9 @@ struct ProjectDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var scans: [ScanSessionMetadata] = []
+    @State private var showResolutionPicker = false
     @State private var showCapture = false
+    @State private var showScansSheet = false
     @State private var showFullScreen3D = false
     @State private var isLoading3D = false
     @State private var loadedPoses: [simd_float4x4] = []
@@ -198,56 +355,115 @@ struct ProjectDetailView: View {
     @State private var displayTitle: String = ""
 
     var body: some View {
-        List {
-            Section {
-                Button {
-                    showCapture = true
-                } label: {
-                    Label("Record New Scan Pass", systemImage: "camera.viewfinder")
-                        .font(.headline)
-                }
+        ZStack {
+            AppTheme.background.ignoresSafeArea()
 
-                Button {
-                    open3DViewer()
-                } label: {
-                    HStack {
-                        Label("View 3D Point Cloud", systemImage: "cube.fill")
-                            .font(.headline)
-                        if isLoading3D {
-                            Spacer()
-                            ProgressView()
+            ScrollView {
+                VStack(spacing: 16) {
+                    // Hero Preview Card
+                    VStack(alignment: .leading, spacing: 0) {
+                        ZStack {
+                            if !scans.isEmpty && engine.totalPointCount > 0 {
+                                PointCloud3DMetalView(
+                                    engine: engine,
+                                    trajectoryPoses: loadedPoses,
+                                    currentPose: loadedPoses.last ?? matrix_identity_float4x4,
+                                    showLiveFrustum: false,
+                                    showTrajectory: false
+                                )
+                                .frame(height: 210)
+                                .onTapGesture {
+                                    showFullScreen3D = true
+                                }
+                            } else {
+                                Color(red: 0.06, green: 0.075, blue: 0.10)
+                                    .frame(height: 210)
+                                Image(systemName: "cube")
+                                    .font(.system(size: 36))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
-                    }
-                }
-                .disabled(scans.isEmpty || isLoading3D)
-            }
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
 
-            Section("Recorded Passes (\(scans.count))") {
-                if scans.isEmpty {
-                    Text("No recordings yet. Tap 'Record New Scan Pass' above to start.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(scans) { scan in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(scan.name)
-                                .font(.headline)
-                            Text("\(scan.frameCount) keyframes • \(scan.resolutionWidth)x\(scan.resolutionHeight) • \(scan.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SCAN PROJECT")
+                                .font(.caption2.bold())
+                                .tracking(1.2)
+                                .foregroundStyle(.secondary)
+                            Text(displayTitle.isEmpty ? project.name : displayTitle)
+                                .font(.title2.bold())
+                            Text("\(scans.count) pass(es) • \(project.updatedAt.formatted(date: .abbreviated, time: .omitted))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        .padding(.vertical, 2)
+                        .padding(16)
                     }
-                    .onDelete { offsets in
-                        for idx in offsets {
-                            ScanProjectStore.shared.deleteScan(projectID: project.id, scanID: scans[idx].id)
-                        }
-                        scans.remove(atOffsets: offsets)
+                    .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(AppTheme.cardBorder, lineWidth: 1)
+                    )
+
+                    // Start Capturing Card
+                    Button {
+                        showResolutionPicker = true
+                    } label: {
+                        ProjectActionRow(
+                            icon: "camera.fill",
+                            iconColor: .white,
+                            badgeColor: AppTheme.badge,
+                            title: "Start Capturing",
+                            subtitle: "Continuous Scan & Go or manual single shots"
+                        )
                     }
+                    .buttonStyle(.plain)
+
+                    // View Scans Card
+                    Button {
+                        showScansSheet = true
+                    } label: {
+                        ProjectActionRow(
+                            icon: "square.3.layers.3d",
+                            iconColor: .white,
+                            badgeColor: AppTheme.badge,
+                            title: "View Scans",
+                            subtitle: "\(scans.count) recorded pass(es) • inspect 3D point clouds"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    // Delete Project Card
+                    Button {
+                        showDeleteConfirm = true
+                    } label: {
+                        ProjectActionRow(
+                            icon: "trash",
+                            iconColor: .red,
+                            badgeColor: Color.red.opacity(0.16),
+                            title: "Delete Project",
+                            subtitle: "Remove this project and its recordings"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
+                .padding()
+            }
+
+            if showResolutionPicker {
+                ResolutionPickerOverlay(
+                    onSelect: { res in
+                        captureManager.applyResolution(res)
+                        showResolutionPicker = false
+                        showCapture = true
+                    },
+                    onCancel: {
+                        showResolutionPicker = false
+                    }
+                )
             }
         }
-        .navigationTitle(displayTitle.isEmpty ? project.name : displayTitle)
+        .navigationTitle("Project")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -289,10 +505,21 @@ struct ProjectDetailView: View {
         }
         .onAppear {
             displayTitle = project.name
-            scans = ScanProjectStore.shared.loadScans(for: project.id)
+            reloadProjectPreview()
+        }
+        .sheet(isPresented: $showScansSheet, onDismiss: {
+            reloadProjectPreview()
+        }) {
+            ProjectScansSheetView(
+                project: project,
+                projectName: displayTitle.isEmpty ? project.name : displayTitle,
+                scans: $scans,
+                engine: engine,
+                captureSettings: captureManager.settings
+            )
         }
         .fullScreenCover(isPresented: $showCapture, onDismiss: {
-            scans = ScanProjectStore.shared.loadScans(for: project.id)
+            reloadProjectPreview()
         }) {
             CaptureView(
                 project: project,
@@ -302,7 +529,7 @@ struct ProjectDetailView: View {
         }
         .fullScreenCover(isPresented: $showFullScreen3D) {
             FullScreen3DViewerView(
-                title: project.name,
+                title: displayTitle.isEmpty ? project.name : displayTitle,
                 engine: engine,
                 trajectoryPoses: loadedPoses,
                 currentPose: loadedPoses.last ?? matrix_identity_float4x4
@@ -310,11 +537,245 @@ struct ProjectDetailView: View {
         }
     }
 
-    private func open3DViewer() {
-        isLoading3D = true
-        engine.loadProjectFromDisk(projectID: project.id, settings: captureManager.settings) { poses in
+    private func reloadProjectPreview() {
+        scans = ScanProjectStore.shared.loadScans(for: project.id)
+        if !scans.isEmpty && !isLoading3D {
+            isLoading3D = true
+            engine.loadProjectFromDisk(projectID: project.id, settings: captureManager.settings) { poses in
+                loadedPoses = poses
+                isLoading3D = false
+            }
+        }
+    }
+}
+
+struct ProjectActionRow: View {
+    let icon: String
+    let iconColor: Color
+    let badgeColor: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(badgeColor)
+                    .frame(width: 44, height: 44)
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundStyle(iconColor)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+        }
+        .padding(14)
+        .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(AppTheme.cardBorder, lineWidth: 1)
+        )
+    }
+}
+
+struct ResolutionPickerOverlay: View {
+    let onSelect: (ResolutionPreset) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65)
+                .ignoresSafeArea()
+                .onTapGesture { onCancel() }
+
+            VStack(spacing: 18) {
+                Text("Choose Capture Resolution")
+                    .font(.title3.bold())
+                Text("Select image quality before starting the camera.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 12) {
+                    Button {
+                        onSelect(.fullHD1080p)
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "viewfinder")
+                                .font(.title2)
+                            Text("1080p")
+                                .font(.headline)
+                            Text("1920 × 1440 • 60 fps")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        onSelect(.uhd4K)
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "sparkles.tv")
+                                .font(.title2)
+                            Text("4K")
+                                .font(.headline)
+                            Text("Full sensor • 30 fps")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button {
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .background(AppTheme.card, in: RoundedRectangle(cornerRadius: 24))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(AppTheme.cardBorder, lineWidth: 1)
+            )
+            .padding(24)
+        }
+    }
+}
+
+struct ProjectScansSheetView: View {
+    let project: ScanProjectMetadata
+    let projectName: String
+    @Binding var scans: [ScanSessionMetadata]
+    @ObservedObject var engine: MetalPointCloudEngine
+    let captureSettings: CaptureSettings
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var showFullScreen3D = false
+    @State private var loadedPoses: [simd_float4x4] = []
+    @State private var isLoading = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppTheme.background.ignoresSafeArea()
+
+                List {
+                    Section {
+                        Button {
+                            open3D()
+                        } label: {
+                            HStack {
+                                Label("Inspect Combined 3D Point Cloud", systemImage: "cube.fill")
+                                    .font(.headline)
+                                Spacer()
+                                if isLoading {
+                                    ProgressView()
+                                }
+                            }
+                        }
+                        .disabled(scans.isEmpty || isLoading)
+                        .listRowBackground(AppTheme.card)
+                    }
+
+                    Section("Captures (\(scans.count))") {
+                        if scans.isEmpty {
+                            Text("No captures yet.")
+                                .foregroundStyle(.secondary)
+                                .listRowBackground(AppTheme.card)
+                        } else {
+                            ForEach(scans) { scan in
+                                Button {
+                                    open3D()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        ZStack {
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(AppTheme.badge)
+                                                .frame(width: 44, height: 44)
+                                            Image(systemName: "cube.transparent")
+                                                .foregroundStyle(.white)
+                                        }
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(scan.name)
+                                                .font(.headline)
+                                                .foregroundStyle(.white)
+                                            Text("\(scan.frameCount) frames • \(scan.resolutionWidth)×\(scan.resolutionHeight) • \(scan.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                                .listRowBackground(AppTheme.card)
+                            }
+                            .onDelete { offsets in
+                                for idx in offsets {
+                                    ScanProjectStore.shared.deleteScan(projectID: project.id, scanID: scans[idx].id)
+                                }
+                                scans.remove(atOffsets: offsets)
+                            }
+                        }
+                    }
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Scans")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                }
+            }
+            .fullScreenCover(isPresented: $showFullScreen3D) {
+                FullScreen3DViewerView(
+                    title: projectName,
+                    engine: engine,
+                    trajectoryPoses: loadedPoses,
+                    currentPose: loadedPoses.last ?? matrix_identity_float4x4
+                )
+            }
+        }
+    }
+
+    private func open3D() {
+        isLoading = true
+        engine.loadProjectFromDisk(projectID: project.id, settings: captureSettings) { poses in
             loadedPoses = poses
-            isLoading3D = false
+            isLoading = false
             showFullScreen3D = true
         }
     }
@@ -327,40 +788,83 @@ struct FullScreen3DViewerView: View {
     let currentPose: simd_float4x4
     @Environment(\.dismiss) private var dismiss
 
+    @State private var showTrajectory = true
+    @State private var pointSize: Float = 3.4
+
     var body: some View {
-        ZStack(alignment: .top) {
+        ZStack {
             PointCloud3DMetalView(
                 engine: engine,
                 trajectoryPoses: trajectoryPoses,
                 currentPose: currentPose,
-                showLiveFrustum: false
+                showLiveFrustum: false,
+                showTrajectory: showTrajectory,
+                pointSize: pointSize
             )
             .ignoresSafeArea()
 
-            HStack {
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.headline)
-                        .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
+            VStack {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.headline)
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(title)
+                            .font(.subheadline.bold())
+                        Text("\(engine.totalPointCount.formatted()) points")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .padding()
+
+                HStack {
+                    VStack(spacing: 12) {
+                        Button {
+                            showTrajectory.toggle()
+                        } label: {
+                            Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            pointSize = min(6.0, pointSize + 0.6)
+                        } label: {
+                            Image(systemName: "plus.magnifyingglass")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            pointSize = max(1.6, pointSize - 0.6)
+                        } label: {
+                            Image(systemName: "minus.magnifyingglass")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(Color.black.opacity(0.45), in: Circle())
+                        }
+                    }
+                    .padding(.leading, 14)
+
+                    Spacer()
                 }
 
                 Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.bold())
-                    Text("\(engine.totalPointCount.formatted()) points • Drag to orbit, 2-finger pan, pinch zoom")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
             }
-            .padding()
         }
     }
 }

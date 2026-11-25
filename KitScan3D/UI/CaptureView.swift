@@ -38,7 +38,7 @@ struct CaptureView: View {
                             Image(systemName: "cube.transparent")
                                 .font(.largeTitle)
                                 .foregroundStyle(.secondary)
-                            Text("No 3D points captured yet.\nTap Record to scan.")
+                            Text("No 3D points captured yet.\nTap the shutter to start scanning.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
@@ -51,8 +51,9 @@ struct CaptureView: View {
                         .ignoresSafeArea()
                 }
 
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     topHUD
+                    statusSubRow
                     trackingBanner
                     if let toastMessage {
                         Text(toastMessage)
@@ -69,12 +70,12 @@ struct CaptureView: View {
                             Spacer()
                             miniMapCard
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, 14)
                     }
 
                     bottomControls
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
             }
             .onAppear {
                 captureManager.onFrameUpdate = { frame in
@@ -115,18 +116,20 @@ struct CaptureView: View {
     }
 
     private var topHUD: some View {
-        HStack(spacing: 8) {
+        HStack {
             Button {
                 captureManager.pauseSession()
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.subheadline.bold())
-                    .padding(8)
+                    .font(.headline)
+                    .frame(width: 40, height: 40)
                     .background(.ultraThinMaterial, in: Circle())
             }
 
-            HStack(spacing: 5) {
+            Spacer()
+
+            HStack(spacing: 6) {
                 Circle()
                     .fill(captureManager.trackingStatus.isHealthy ? Color.green : Color.orange)
                     .frame(width: 8, height: 8)
@@ -134,14 +137,38 @@ struct CaptureView: View {
                     .font(.caption.bold())
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.ultraThinMaterial, in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
 
-            Spacer(minLength: 4)
+            Spacer()
 
-            HStack(spacing: 8) {
+            Button {
+                isFullScreen3D.toggle()
+            } label: {
+                Image(systemName: isFullScreen3D ? "camera.fill" : "cube.fill")
+                    .font(.headline)
+                    .frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+        }
+        .padding(.horizontal, 14)
+    }
+
+    private var statusSubRow: some View {
+        HStack {
+            Label(captureManager.settings.resolution.rawValue, systemImage: "camera.aperture")
+                .font(.caption2.bold())
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .fixedSize(horizontal: true, vertical: false)
+
+            Spacer()
+
+            HStack(spacing: 10) {
                 Label("\(captureManager.capturedFrameCount)", systemImage: "photo.stack")
                     .lineLimit(1)
                 Label(formatPointCount(engine.totalPointCount), systemImage: "circle.grid.3x3")
@@ -152,22 +179,13 @@ struct CaptureView: View {
                         .lineLimit(1)
                 }
             }
-            .font(.caption.monospacedDigit())
+            .font(.caption2.monospacedDigit().bold())
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(.ultraThinMaterial, in: Capsule())
             .fixedSize(horizontal: true, vertical: false)
-
-            Button {
-                isFullScreen3D.toggle()
-            } label: {
-                Image(systemName: isFullScreen3D ? "camera.fill" : "cube.fill")
-                    .font(.subheadline)
-                    .padding(8)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
     }
 
     @ViewBuilder
@@ -181,7 +199,7 @@ struct CaptureView: View {
                     .font(.caption.weight(.medium))
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
             .background(Color.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal)
         }
@@ -190,14 +208,21 @@ struct CaptureView: View {
     private var miniMapCard: some View {
         VStack(spacing: 0) {
             HStack(spacing: 4) {
+                Text("LIVE MAP")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+
+                Spacer()
+
                 Button {
                     mapMode = .map2D
                 } label: {
-                    Text("2D Map")
+                    Text("2D")
                         .font(.caption2.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(mapMode == .map2D ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(mapMode == .map2D ? Color.white.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
@@ -205,11 +230,11 @@ struct CaptureView: View {
                 Button {
                     mapMode = .view3D
                 } label: {
-                    Text("3D Cloud")
+                    Text("3D")
                         .font(.caption2.bold())
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(mapMode == .view3D ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(mapMode == .view3D ? Color.white.opacity(0.2) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
@@ -234,8 +259,8 @@ struct CaptureView: View {
             }
             .clipped()
         }
-        .frame(width: 174, height: 198)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .frame(width: 174, height: 196)
+        .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
@@ -244,35 +269,95 @@ struct CaptureView: View {
 
     private var bottomControls: some View {
         VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                Toggle("Depth", isOn: $captureManager.settings.showLiveDepthPreview)
-                    .toggleStyle(.button)
-                    .font(.caption.bold())
-                Toggle("Coverage", isOn: $captureManager.settings.showCoverageOverlay)
-                    .toggleStyle(.button)
-                    .font(.caption.bold())
+            // Compact Camera Quick-Bar matching Design mockups
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    Button {
+                        captureManager.unlockAndRemeterAutoMagic()
+                        showToast("Re-metering exposure & WB...")
+                    } label: {
+                        QuickBarChip(
+                            icon: "sparkles",
+                            title: captureManager.settings.isAutoMagicLocked ? "Locked" : "Auto",
+                            isActive: captureManager.settings.isAutoMagicLocked
+                        )
+                    }
+                    .buttonStyle(.plain)
 
-                Button {
-                    mapMode = mapMode == .hidden ? .map2D : .hidden
-                } label: {
-                    Label(mapMode == .hidden ? "Show Map" : "Hide Map", systemImage: "map")
-                        .font(.caption.bold())
+                    Button { showSettingsSheet = true } label: {
+                        QuickBarChip(icon: "camera", title: "24mm", isActive: false)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showSettingsSheet = true } label: {
+                        QuickBarChip(icon: "thermometer.medium", title: "\(Int(captureManager.settings.whiteBalanceKelvin))K", isActive: false)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showSettingsSheet = true } label: {
+                        let inv = Int(round(1.0 / max(0.0001, captureManager.settings.manualExposureDurationSeconds)))
+                        QuickBarChip(icon: "timer", title: "1/\(inv)", isActive: false)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button { showSettingsSheet = true } label: {
+                        QuickBarChip(icon: "dial.low", title: "ISO \(Int(captureManager.settings.manualISO))", isActive: false)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        captureManager.settings.showLiveDepthPreview.toggle()
+                    } label: {
+                        QuickBarChip(
+                            icon: "arrow.up.and.down",
+                            title: "Depth",
+                            isActive: captureManager.settings.showLiveDepthPreview
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        captureManager.settings.showCoverageOverlay.toggle()
+                    } label: {
+                        QuickBarChip(
+                            icon: "square.grid.2x2",
+                            title: "Coverage",
+                            isActive: captureManager.settings.showCoverageOverlay
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        mapMode = mapMode == .hidden ? .map2D : .hidden
+                    } label: {
+                        QuickBarChip(
+                            icon: "map",
+                            title: "Map",
+                            isActive: mapMode != .hidden
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.bordered)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 12)
 
-            HStack(spacing: 28) {
+            Text(captureManager.settings.captureMode == .scanAndGo ? "AUTO SCAN" : "MANUAL SHOT")
+                .font(.caption2.bold())
+                .tracking(1.4)
+                .foregroundStyle(.white.opacity(0.85))
+
+            HStack(spacing: 24) {
                 Button {
                     showSettingsSheet = true
                 } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.title3)
-                        Text("Controls")
-                            .font(.caption2)
-                    }
-                    .frame(width: 60)
+                    Label("Controls", systemImage: "slider.horizontal.3")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
                 }
 
                 // Main Record / Stop button
@@ -297,7 +382,7 @@ struct CaptureView: View {
                                 .frame(width: 28, height: 28)
                         } else {
                             Circle()
-                                .fill(Color.red)
+                                .fill(Color.white)
                                 .frame(width: 58, height: 58)
                         }
                     }
@@ -307,30 +392,32 @@ struct CaptureView: View {
                     Button {
                         captureManager.triggerManualShot()
                     } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "camera.shutter.button.fill")
-                                .font(.title2)
-                            Text("Snap")
-                                .font(.caption2)
-                        }
-                        .frame(width: 60)
+                        Label("Snap", systemImage: "camera.shutter.button.fill")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color.green.opacity(0.35), in: Capsule())
                     }
                 } else {
                     Button {
-                        captureManager.unlockAndRemeterAutoMagic()
-                        showToast("Re-metering exposure & WB...")
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "wand.and.stars")
-                                .font(.title3)
-                            Text("Re-Meter")
-                                .font(.caption2)
+                        if captureManager.isRecording {
+                            captureManager.stopRecording()
+                            captureManager.pauseSession()
+                            showScanComplete = true
+                        } else {
+                            captureManager.pauseSession()
+                            dismiss()
                         }
-                        .frame(width: 60)
+                    } label: {
+                        Label("Done", systemImage: "checkmark")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.green.opacity(0.35), in: Capsule())
                     }
                 }
             }
-            .padding(.bottom, 10)
+            .padding(.bottom, 8)
         }
     }
 
@@ -357,6 +444,24 @@ struct CaptureView: View {
     }
 }
 
+struct QuickBarChip: View {
+    let icon: String
+    let title: String
+    let isActive: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(isActive ? Color.green : .white)
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(isActive ? Color.green : .white.opacity(0.8))
+        }
+        .frame(minWidth: 46)
+    }
+}
+
 struct ScanCompleteResultView: View {
     let projectName: String
     let keyframeCount: Int
@@ -365,13 +470,18 @@ struct ScanCompleteResultView: View {
     let onBackToProjects: () -> Void
     let onScanAnotherPass: () -> Void
 
+    @State private var showTrajectory = true
+    @State private var pointSize: Float = 3.4
+
     var body: some View {
         ZStack {
             PointCloud3DMetalView(
                 engine: engine,
                 trajectoryPoses: trajectoryPoses,
                 currentPose: trajectoryPoses.last ?? matrix_identity_float4x4,
-                showLiveFrustum: false
+                showLiveFrustum: false,
+                showTrajectory: showTrajectory,
+                pointSize: pointSize
             )
             .ignoresSafeArea()
 
@@ -380,7 +490,7 @@ struct ScanCompleteResultView: View {
                     Button {
                         onBackToProjects()
                     } label: {
-                        Label("Back to Projects", systemImage: "chevron.left")
+                        Label("Projects", systemImage: "chevron.left")
                             .font(.subheadline.bold())
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -402,6 +512,40 @@ struct ScanCompleteResultView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 }
                 .padding()
+
+                HStack {
+                    VStack(spacing: 12) {
+                        Button {
+                            showTrajectory.toggle()
+                        } label: {
+                            Image(systemName: showTrajectory ? "point.topleft.down.curvedto.point.bottomright.up.fill" : "point.topleft.down.curvedto.point.bottomright.up")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(showTrajectory ? Color.accentColor.opacity(0.4) : Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            pointSize = min(6.0, pointSize + 0.6)
+                        } label: {
+                            Image(systemName: "plus.magnifyingglass")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(Color.black.opacity(0.45), in: Circle())
+                        }
+
+                        Button {
+                            pointSize = max(1.6, pointSize - 0.6)
+                        } label: {
+                            Image(systemName: "minus.magnifyingglass")
+                                .font(.subheadline)
+                                .frame(width: 42, height: 42)
+                                .background(Color.black.opacity(0.45), in: Circle())
+                        }
+                    }
+                    .padding(.leading, 14)
+
+                    Spacer()
+                }
 
                 Spacer()
 

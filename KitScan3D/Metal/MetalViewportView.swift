@@ -80,6 +80,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
     let trajectoryPoses: [simd_float4x4]
     let currentPose: simd_float4x4
     var showLiveFrustum: Bool = true
+    var showTrajectory: Bool = true
+    var pointSize: Float = 3.4
 
     func makeCoordinator() -> Coordinator {
         Coordinator(engine: engine)
@@ -90,7 +92,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
         mtk.device = engine.device
         mtk.colorPixelFormat = .bgra8Unorm
         mtk.depthStencilPixelFormat = .depth32Float
-        mtk.clearColor = MTLClearColor(red: 0.06, green: 0.07, blue: 0.09, alpha: 1.0)
+        mtk.clearColor = MTLClearColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1.0)
         mtk.preferredFramesPerSecond = 60
         mtk.delegate = context.coordinator
 
@@ -106,6 +108,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
         context.coordinator.trajectoryPoses = trajectoryPoses
         context.coordinator.currentPose = currentPose
         context.coordinator.showLiveFrustum = showLiveFrustum
+        context.coordinator.showTrajectory = showTrajectory
+        context.coordinator.pointSize = pointSize
     }
 
     final class Coordinator: NSObject, MTKViewDelegate {
@@ -113,6 +117,8 @@ struct PointCloud3DMetalView: UIViewRepresentable {
         var trajectoryPoses: [simd_float4x4] = []
         var currentPose: simd_float4x4 = matrix_identity_float4x4
         var showLiveFrustum: Bool = true
+        var showTrajectory: Bool = true
+        var pointSize: Float = 3.4
 
         private var depthStencilState: MTLDepthStencilState?
         private var yaw: Float = 0.6
@@ -163,7 +169,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
 
             let aspect = Float(max(1.0, view.drawableSize.width) / max(1.0, view.drawableSize.height))
             let viewProj = makeViewProjection(aspect: aspect)
-            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: 2.4)
+            var uniforms = Scene3DUniforms(viewProjection: viewProj, pointSize: pointSize)
 
             let snap = engine.snapshot3DPointBuffer()
             if let pcPipeline = engine.pointCloudPipeline,
@@ -176,7 +182,7 @@ struct PointCloud3DMetalView: UIViewRepresentable {
             }
 
             // Draw trajectory + active camera frustum
-            let lineVerts = buildTrajectoryAndFrustumVertices()
+            let lineVerts = showTrajectory ? buildTrajectoryAndFrustumVertices() : []
             if let lPipeline = engine.linePipeline, !lineVerts.isEmpty {
                 encoder.setRenderPipelineState(lPipeline)
                 encoder.setVertexBytes(lineVerts, length: MemoryLayout<LineVertex>.stride * lineVerts.count, index: 0)
