@@ -150,7 +150,9 @@ struct CameraControlsSheet: View {
                     }
 
                     Stepper(
-                        "Max Points: \(captureManager.settings.maxPointBudget / 1000)K",
+                        captureManager.settings.maxPointBudget >= 1_000_000
+                            ? String(format: "Max Points: %.1fM", Double(captureManager.settings.maxPointBudget) / 1_000_000.0)
+                            : "Max Points: \(captureManager.settings.maxPointBudget / 1000)K",
                         value: $captureManager.settings.maxPointBudget,
                         in: 250_000...4_000_000,
                         step: 250_000

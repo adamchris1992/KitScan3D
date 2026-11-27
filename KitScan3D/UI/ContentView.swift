@@ -37,7 +37,7 @@ struct UnsupportedHardwareView: View {
                 .foregroundStyle(.orange)
             Text("LiDAR Sensor Required")
                 .font(.title2.bold())
-            Text("KitScan3D requires an iPhone Pro or iPad Pro with a hardware LiDAR scanner (`ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)`).")
+            Text("Vulpes3DGS requires an iPhone Pro or iPad Pro with a hardware LiDAR scanner (`ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)`).")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

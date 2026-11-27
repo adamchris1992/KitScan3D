@@ -26,8 +26,8 @@ jobs:
 
       - name: Build unsigned xcarchive
         env:
-          PROJECT_NAME: KitScan3D.xcodeproj
-          SCHEME_NAME: KitScan3D
+          PROJECT_NAME: Vulpes3DGS.xcodeproj
+          SCHEME_NAME: Vulpes3DGS
         run: |
           xcodebuild archive \
             -project "$PROJECT_NAME" \
@@ -35,7 +35,7 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
-            -archivePath build/KitScan3D.xcarchive \
+            -archivePath build/Vulpes3DGS.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
@@ -43,11 +43,11 @@ jobs:
       - name: Package Payload into unsigned .ipa
         run: |
           mkdir -p build/Payload
-          cp -r build/KitScan3D.xcarchive/Products/Applications/*.app build/Payload/
-          cd build && zip -qr KitScan3D.ipa Payload
+          cp -r build/Vulpes3DGS.xcarchive/Products/Applications/*.app build/Payload/
+          cd build && zip -qr Vulpes3DGS.ipa Payload
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KitScan3D-unsigned-ipa
-          path: build/KitScan3D.ipa
+          name: Vulpes3DGS-unsigned-ipa
+          path: build/Vulpes3DGS.ipa

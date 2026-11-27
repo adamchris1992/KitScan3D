@@ -1,6 +1,6 @@
-name: KitScan3D
+name: Vulpes3DGS
 options:
-  bundleIdPrefix: com.kitscan3d
+  bundleIdPrefix: com.vulpes3dgs
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "15.4"
@@ -15,14 +15,14 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
 
 targets:
-  KitScan3D:
+  Vulpes3DGS:
     type: application
     platform: iOS
     sources:
       - path: KitScan3D
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitscan3d.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.vulpes3dgs.app
         INFOPLIST_FILE: KitScan3D/Info.plist
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         LD_RUNPATH_SEARCH_PATHS:
@@ -32,16 +32,16 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: YES
     scheme:
       testTargets:
-        - KitScan3DTests
+        - Vulpes3DGSTests
 
-  KitScan3DTests:
+  Vulpes3DGSTests:
     type: bundle.unit-test
     platform: iOS
     sources:
       - path: KitScan3DTests
     dependencies:
-      - target: KitScan3D
+      - target: Vulpes3DGS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitscan3d.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.vulpes3dgs.tests
         GENERATE_INFOPLIST_FILE: YES

@@ -1,8 +1,8 @@
 import XCTest
 import simd
-@testable import KitScan3D
+@testable import Vulpes3DGS
 
-final class KitScan3DTests: XCTestCase {
+final class Vulpes3DGSTests: XCTestCase {
     func testScaledIntrinsics() {
         let intrinsics = simd_float3x3(
             SIMD3<Float>(1000, 0, 0),
